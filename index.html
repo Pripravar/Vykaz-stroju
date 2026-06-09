@@ -288,6 +288,8 @@ function hoursDiff(od, doStr){
   return Math.round(mins / 6) / 10;
 }
 function round1(n){ return Math.round((Number(n)||0)*10)/10; }
+// Odpracované hodiny záznamu (nové pole hodiny, jinak dopočet ze starého od–do)
+function recHodiny(z){ return (z && z.hodiny!=null) ? Number(z.hodiny) : hoursDiff(z&&z.hodOd, z&&z.hodDo); }
 function uid(prefix){ return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); }
 function slug(s){ return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'x'; }
 function escapeHtml(s){
@@ -596,7 +598,7 @@ function renderDen(params){
         <div class="stavba-sum"><span>Stavba</span><b>${escapeHtml(r.stavbaText||'')}</b></div>
         <div class="stavba-sum"><span>Počítadlo počáteční → konečný</span><b>${r.stavZacatek!=null?r.stavZacatek:'–'} → ${r.stavCitadla!=null?r.stavCitadla:'–'}</b></div>
         <div class="stavba-sum"><span>Motohodiny</span><b>${r.mth!=null?round1(r.mth).toFixed(1)+' mth':'–'}</b></div>
-        ${(r.hodOd||r.hodDo)?`<div class="stavba-sum"><span>Hodiny</span><b>${r.hodOd||''}–${r.hodDo||''}</b></div>`:''}
+        ${recHodiny(r)?`<div class="stavba-sum"><span>Odpracováno</span><b>${recHodiny(r)} h</b></div>`:''}
         <div class="stavba-sum"><span>Tankování</span><b>${r.tankoval?'⛽ ano':'ne'}</b></div>
         ${r.poznamka?`<div class="stavba-sum"><span>Poznámka</span><b>${escapeHtml(r.poznamka)}</b></div>`:''}
       </div>
@@ -607,19 +609,15 @@ function renderDen(params){
   }
 
   const strojeAkt = state.stroje.filter(s=>s.aktivni!==false);
-  const learnedManual = strojManualSuggestions();
   const existingManualName = existing && existing.strojRucni ? (existing.strojNazev||'') : '';
   const strojOptions = strojeAkt.map(s =>
     `<option value="${s.id}" ${existing && existing.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}${s.spz?' ('+escapeHtml(s.spz)+')':''}</option>`).join('');
-  const manualOptions = learnedManual.map(n =>
-    `<option value="man:${escapeHtml(n)}" ${slug(existingManualName)===slug(n)?'selected':''}>${escapeHtml(n)} — ručně</option>`).join('');
-  const manualNew = existing && existing.strojRucni && !learnedManual.some(n=>slug(n)===slug(existingManualName));
+  const manualNew = existing && existing.strojRucni;   // legacy záznam bez číselníku
+  const strojNames = strojeAkt.map(s=>s.nazev);
   const autor = existing ? existing.strojnikJmeno : state.me.jmeno;
 
   document.getElementById('main').innerHTML = `
     <div class="dekada-title">${isoToCz(datum)}</div>
-
-    <button class="full secondary" style="margin-bottom:12px;" onclick="copyYesterday()">📋 Jako včera (předvyplnit)</button>
 
     <div class="card">
       <div class="le-sub" style="margin-bottom:10px;">✍ Zapisuje: <b style="color:var(--text);">${escapeHtml(autor)}</b>${existing&&existing.ownerUid!==state.uid?' (upravuje admin)':''}</div>
@@ -633,13 +631,13 @@ function renderDen(params){
         <select id="f-stroj" onchange="onStrojChange()">
           <option value="">— vyber stroj —</option>
           ${strojOptions}
-          ${manualOptions}
-          <option value="__manual__" ${manualNew?'selected':''}>✏️ napsat nový ručně…</option>
+          <option value="__manual__" ${manualNew?'selected':''}>✏️ napsat ručně (přidá se do seznamu)…</option>
         </select>
         <div class="ac-wrap" id="f-strojManual-wrap" style="margin-top:8px; display:${manualNew?'block':'none'};">
           <input id="f-strojManual" placeholder="napiš název stroje" value="${manualNew?escapeHtml(existingManualName):''}" autocomplete="off" oninput="onManualInput()">
           <div class="ac-box" id="f-strojManual-box"></div>
         </div>
+        <button type="button" class="full secondary" style="margin-top:8px;" onclick="copyYesterday()">📋 Vyplnit jako minule (tento stroj)</button>
       </div>
 
       <div id="day-conflict" class="moto-hint warn" style="margin:0 0 6px;"></div>
@@ -672,12 +670,8 @@ function renderDen(params){
 
     <div class="card">
       <h2>Odpracované hodiny</h2>
-      <div class="grid-3">
-        <div><label>od</label><input id="f-od" type="time" value="${r.hodOd||''}" onchange="updateHod()"></div>
-        <div><label>do</label><input id="f-do" type="time" value="${r.hodDo||''}" onchange="updateHod()"></div>
-        <div><label>celkem</label><input id="f-hod" readonly value="${hoursDiff(r.hodOd,r.hodDo).toFixed(1)}" style="opacity:.7;"></div>
-      </div>
-      <p class="field-hint">Vyplň hodiny i počítadlo – appka porovná, jestli si někde nesedí (kontrola překlepu).</p>
+      <input id="f-hodiny" type="number" step="0.5" inputmode="decimal" placeholder="např. 8" value="${r.hodiny!=null?r.hodiny:(hoursDiff(r.hodOd,r.hodDo)||'')}" oninput="updateMth()">
+      <p class="field-hint">Vyplň hodiny i počítadlo – appka porovná, jestli si nesedí (kontrola překlepu).</p>
     </div>
 
     <div class="card">
@@ -704,7 +698,7 @@ function renderDen(params){
   `;
   _tank = !!r.tankoval;
   attachAutocomplete('f-stavba','f-stavba-box', stavbaSuggestions());
-  attachAutocomplete('f-strojManual','f-strojManual-box', learnedManual);
+  attachAutocomplete('f-strojManual','f-strojManual-box', strojNames);
   setStartDefault(false);
   updateMth();
   checkConflict();
@@ -741,15 +735,13 @@ function onStrojChange(){
   updateMth();
   checkConflict();
 }
-function updateHod(){
-  document.getElementById('f-hod').value = hoursDiff(
-    document.getElementById('f-od').value, document.getElementById('f-do').value).toFixed(1);
-  updateMth();
-}
 function currentStrojKey(){
   const sel = document.getElementById('f-stroj').value;
-  if(sel==='__manual__'){ return 'man:'+slug(document.getElementById('f-strojManual').value); }
-  if(sel.indexOf('man:')===0){ return 'man:'+slug(sel.slice(4)); }
+  if(sel==='__manual__'){
+    const nazev = document.getElementById('f-strojManual').value;
+    const ex = state.stroje.find(x => slug(x.nazev)===slug(nazev));   // už je v číselníku?
+    return ex ? ('id:'+ex.id) : ('man:'+slug(nazev));
+  }
   if(sel){ return 'id:'+sel; }
   return null;
 }
@@ -776,7 +768,7 @@ function updateMth(){
   if(!hint) return;
   const start = parseFloat(document.getElementById('f-stav-zac').value);
   const end   = parseFloat(document.getElementById('f-stav').value);
-  const hod   = hoursDiff(document.getElementById('f-od').value, document.getElementById('f-do').value);
+  const hod   = parseFloat(document.getElementById('f-hodiny').value) || 0;
   if(isNaN(start) || isNaN(end)){
     hint.className='moto-hint';
     hint.innerHTML='Vyplň počáteční i konečný stav počítadla – spočítají se motohodiny.';
@@ -801,28 +793,23 @@ function updateMth(){
   hint.className = cls; hint.innerHTML = html;
 }
 
+// „Jako minule" – podle ZVOLENÉHO STROJE (poslední den toho stroje od kohokoli).
 function copyYesterday(){
-  const mine = myZaznamy();
-  if(!mine.length){ toast('Není z čeho kopírovat'); return; }
-  const last = mine[0];
-  const sel = document.getElementById('f-stroj');
-  if(last.strojId && state.stroje.some(s=>s.id===last.strojId)){
-    sel.value = last.strojId;
-  } else if(last.strojNazev){
-    const opt = [...sel.options].find(o => o.value.indexOf('man:')===0 && slug(o.value.slice(4))===slug(last.strojNazev));
-    sel.value = opt ? opt.value : '__manual__';
-  }
-  onStrojChange();
-  if(sel.value==='__manual__' && last.strojNazev) document.getElementById('f-strojManual').value = last.strojNazev;
+  const strojKey = currentStrojKey();
+  if(!strojKey){ toast('Nejdřív vyber stroj'); return; }
+  const datum = document.getElementById('f-datum').value;
+  const recs = state.zaznamy
+    .filter(z => zStrojKey(z)===strojKey && z.datum < datum)
+    .sort((a,b)=> a.datum < b.datum ? 1 : -1);
+  if(!recs.length){ toast('Tento stroj nemá dřívější zápis – počáteček vyplň ručně'); setStartDefault(true); return; }
+  const last = recs[0];
   document.getElementById('f-stavba').value = last.stavbaText || '';
-  document.getElementById('f-od').value = last.hodOd||'';
-  document.getElementById('f-do').value = last.hodDo||'';
-  updateHod();
+  document.getElementById('f-hodiny').value = recHodiny(last) || '';
   setTank(!!last.tankoval);
-  setStartDefault(true);
+  setStartDefault(true);   // počáteční = konečný z minulého dne stroje
   document.getElementById('f-stav').focus();
   updateMth();
-  toast('✓ Předvyplněno z '+isoToCz(last.datum)+' – uprav konečný stav počítadla');
+  toast('✓ Podle '+isoToCz(last.datum)+(last.strojnikJmeno?' ('+last.strojnikJmeno+')':'')+' – uprav konečný stav');
 }
 
 async function saveDen(){
@@ -831,11 +818,20 @@ async function saveDen(){
   const sel = document.getElementById('f-stroj').value;
   let strojId=null, strojNazev='', strojRucni=false;
   if(sel==='__manual__'){
-    strojNazev = (document.getElementById('f-strojManual').value||'').trim();
-    strojRucni = true;
-    if(!strojNazev){ toast('Napiš název stroje'); return; }
-  } else if(sel.indexOf('man:')===0){
-    strojNazev = sel.slice(4); strojRucni = true;
+    const nazev = (document.getElementById('f-strojManual').value||'').trim();
+    if(!nazev){ toast('Napiš název stroje'); return; }
+    // Stejný stroj už v číselníku? Použij ho. Jinak ho rovnou PŘIDEJ do číselníku,
+    // aby byl příště ve výběru i v přehledu.
+    const ex = state.stroje.find(x => slug(x.nazev)===slug(nazev));
+    if(ex){ strojId = ex.id; strojNazev = ex.nazev; }
+    else {
+      strojId = uid('stroj'); strojNazev = nazev;
+      try{
+        await db.collection('stroje').doc(strojId).set({
+          nazev, typ:'', spz:'', aktivni:true, lastMoto:null, lastMotoDate:null, autoPridano:true
+        });
+      }catch(e){ alert('Nepodařilo se přidat stroj: '+e.message); return; }
+    }
   } else if(sel){
     const s = state.stroje.find(x=>x.id===sel);
     if(!s){ toast('Vyber stroj'); return; }
@@ -848,11 +844,11 @@ async function saveDen(){
   const stavZacatek = zacStr==='' ? null : Number(zacStr);
   const endStr = document.getElementById('f-stav').value;
   const stavCitadla = endStr==='' ? null : Number(endStr);
-  const hodOd = document.getElementById('f-od').value;
-  const hodDo = document.getElementById('f-do').value;
+  const hodinyStr = document.getElementById('f-hodiny').value;
+  const hodiny = hodinyStr==='' ? null : Number(hodinyStr);
   const poznamka = (document.getElementById('f-pozn').value||'').trim();
 
-  if(stavCitadla==null && !stavbaText && !hodOd){ toast('Vyplň aspoň stavbu nebo počítadlo'); return; }
+  if(stavCitadla==null && !stavbaText && hodiny==null){ toast('Vyplň aspoň stavbu nebo počítadlo'); return; }
 
   const strojKey = strojId ? ('id:'+strojId) : ('man:'+slug(strojNazev));
   let mth = 0;
@@ -878,7 +874,7 @@ async function saveDen(){
     stavbaId: stavbaMatch ? stavbaMatch.id : null,
     stavbaText,
     stavZacatek, stavCitadla, mth,
-    hodOd, hodDo, tankoval: !!_tank,
+    hodiny, tankoval: !!_tank,
     poznamka,
     upravilJmeno: state.me.jmeno,
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -965,6 +961,12 @@ async function deletePoznamka(recordId, pid){
    7) PŘEHLED / DESETIDENKA – filtry + součty po stavbách
    ════════════════════════════════════════════════════════════════════ */
 const filt = { strojId:'', strojnikId:'', stavba:'', from:'', to:'' };
+let prehledMode = 'stavby';   // stavby | stroje | strojnici | moje
+function setPrehledMode(m){
+  prehledMode = m;
+  if(m==='moje') filt.strojnikId = state.me.id;
+  renderPrehled();
+}
 function setPeriod(kind){
   const cur = currentDecade();
   if(kind==='dek'){ const r=decadeRange(cur.rok,cur.mesic,cur.dekada); filt.from=iso(cur.rok,cur.mesic,r.from); filt.to=iso(cur.rok,cur.mesic,r.to); }
@@ -996,16 +998,20 @@ function renderPrehled(){
   document.getElementById('page-title').innerHTML = 'Přehled';
   document.getElementById('btn-logout').style.display = 'none';
 
-  const onlyMine = state.me.role!=='admin';
-  if(onlyMine && !filt.strojnikId) filt.strojnikId = state.me.id;
+  const rows = filteredZaznamy();   // všichni vidí vše (rules to dovolují číst); editovat lze jen svoje
 
-  const rows = filteredZaznamy().filter(z => onlyMine ? z.strojnikId===state.me.id : true);
-
-  const bySt = {};
-  let sumMth=0;
-  rows.forEach(z => { const k=z.stavbaText||'(bez stavby)'; bySt[k]=(bySt[k]||0)+(Number(z.mth)||0); sumMth+=(Number(z.mth)||0); });
-  const stavbySum = Object.keys(bySt).sort().map(k =>
-    `<div class="stavba-sum"><span>${escapeHtml(k)}</span><b>${round1(bySt[k]).toFixed(1)} mth</b></div>`).join('');
+  const groupLabel = prehledMode==='stroje' ? 'po strojích'
+                   : prehledMode==='strojnici' ? 'po strojnících'
+                   : prehledMode==='moje' ? 'moje dny – po stavbách'
+                   : 'po stavbách';
+  const keyOf = z => prehledMode==='stroje' ? (z.strojNazev||'(stroj?)')
+                  : prehledMode==='strojnici' ? (z.strojnikJmeno||'(?)')
+                  : (z.stavbaText||'(bez stavby)');
+  const grp = {}; let sumMth=0;
+  rows.forEach(z => { const k=keyOf(z); grp[k]=(grp[k]||0)+(Number(z.mth)||0); sumMth+=(Number(z.mth)||0); });
+  const grpSum = Object.keys(grp).sort((a,b)=>a.localeCompare(b,'cs')).map(k =>
+    `<div class="stavba-sum"><span>${escapeHtml(k)}</span><b>${round1(grp[k]).toFixed(1)} mth</b></div>`).join('');
+  const modeTab = (m,l)=>`<span class="chip ${prehledMode===m?'active':''}" onclick="setPrehledMode('${m}')">${l}</span>`;
 
   const strojOpts = '<option value="">Všechny stroje</option>'+state.stroje.map(s=>`<option value="${s.id}" ${filt.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}</option>`).join('');
   const strojnikOpts = '<option value="">Všichni strojníci</option>'+state.strojnici.map(s=>`<option value="${s.id}" ${filt.strojnikId===s.id?'selected':''}>${escapeHtml(s.jmeno)}</option>`).join('');
@@ -1021,11 +1027,14 @@ function renderPrehled(){
       <td class="num">${z.stavZacatek!=null?z.stavZacatek:''}</td>
       <td class="num">${z.stavCitadla!=null?z.stavCitadla:''}</td>
       <td class="num">${z.mth!=null?round1(z.mth).toFixed(1):''}</td>
-      <td>${z.hodOd&&z.hodDo?z.hodOd+'–'+z.hodDo:''}</td>
+      <td class="num">${recHodiny(z)||''}</td>
       <td style="text-align:center;">${z.tankoval?'⛽':''}</td>
     </tr>`).join('');
 
   document.getElementById('main').innerHTML = `
+    <div class="chips no-print" style="margin-bottom:8px;">
+      ${modeTab('stavby','Po stavbách')}${modeTab('stroje','Po strojích')}${modeTab('strojnici','Po strojnících')}${modeTab('moje','Moje dny')}
+    </div>
     <div class="card no-print">
       <h2>Filtry</h2>
       <div class="chips">
@@ -1039,13 +1048,13 @@ function renderPrehled(){
         <div><label>Do</label><input id="flt-to" type="date" value="${filt.to}" onchange="applyFilter()"></div>
       </div>
       <div class="row" style="display:block;margin-top:8px;"><label>Stroj</label><select id="flt-stroj" onchange="applyFilter()">${strojOpts}</select></div>
-      ${onlyMine?'<input type="hidden" id="flt-strojnik" value="'+state.me.id+'">':`<div class="row" style="display:block;"><label>Strojník</label><select id="flt-strojnik" onchange="applyFilter()">${strojnikOpts}</select></div>`}
+      <div class="row" style="display:block;"><label>Strojník</label><select id="flt-strojnik" onchange="applyFilter()">${strojnikOpts}</select></div>
       <div class="row" style="display:block;"><label>Stavba</label><select id="flt-stavba" onchange="applyFilter()">${stavbaOpts}</select></div>
     </div>
 
     <div class="card">
-      <h2>Součet motohodin po stavbách</h2>
-      ${stavbySum || '<div class="empty-msg">Žádná data pro tento filtr.</div>'}
+      <h2>Součet motohodin ${groupLabel}</h2>
+      ${grpSum || '<div class="empty-msg">Žádná data pro tento filtr.</div>'}
       ${rows.length?`<div class="stavba-sum" style="border:none;margin-top:6px;"><span><b>CELKEM</b></span><b>${round1(sumMth).toFixed(1)} mth</b> </div>`:''}
     </div>
 
@@ -1060,23 +1069,24 @@ function renderPrehled(){
       </table>
     </div>
 
-    <div class="row no-print" style="margin-top:14px;">
-      <button class="secondary" style="flex:1;" onclick="exportCSV()">📥 Stáhnout CSV</button>
-      <button class="secondary" style="flex:1;" onclick="window.print()">🖨 Tisk / PDF</button>
+    <button class="green full no-print" style="margin-top:14px;" onclick="exportExcel()">📊 Stáhnout Excel (desetidenka)</button>
+    <div class="row no-print" style="margin-top:8px;">
+      <button class="secondary" style="flex:1;" onclick="exportCSV()">📥 CSV</button>
+      <button class="secondary" style="flex:1;" onclick="window.print()">🖨 Tisk</button>
     </div>
+    <p class="help no-print">Tip: pro „desetidenku" jednoho stroje si nahoře vyfiltruj stroj a období (např. měsíc), pak stáhni Excel.</p>
   `;
 }
 
 function exportCSV(){
-  const onlyMine = state.me.role!=='admin';
-  const rows = filteredZaznamy().filter(z => onlyMine ? z.strojnikId===state.me.id : true);
-  const head = ['Datum','Stroj','Strojnik','Stavba','Pocatecni','Konecny','Mth','Od','Do','Tankovani','Poznamka'];
+  const rows = filteredZaznamy();
+  const head = ['Datum','Stroj','Strojnik','Stavba','Pocatecni','Konecny','Mth','Hodiny','Tankovani','Poznamka'];
   const lines = [head.join(';')];
   rows.forEach(z=>{
     lines.push([
       z.datum, csv(z.strojNazev), csv(z.strojnikJmeno), csv(z.stavbaText),
       z.stavZacatek!=null?z.stavZacatek:'', z.stavCitadla!=null?z.stavCitadla:'', z.mth!=null?round1(z.mth):'',
-      z.hodOd||'', z.hodDo||'', z.tankoval?'ano':'', csv(z.poznamka)
+      recHodiny(z)||'', z.tankoval?'ano':'', csv(z.poznamka)
     ].join(';'));
   });
   const bySt={}; rows.forEach(z=>{const k=z.stavbaText||'(bez stavby)';bySt[k]=(bySt[k]||0)+(Number(z.mth)||0);});
@@ -1090,6 +1100,90 @@ function exportCSV(){
   toast('✓ CSV staženo');
 }
 function csv(s){ s=String(s==null?'':s); return /[;"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    if([...document.scripts].some(s=>s.src===src)){ res(); return; }
+    const s=document.createElement('script'); s.src=src;
+    s.onload=()=>res(); s.onerror=()=>rej(new Error('load fail'));
+    document.head.appendChild(s);
+  });
+}
+
+// Excel ve formátu ruční desetidenky (přes ExcelJS, načte se z CDN při prvním exportu).
+async function exportExcel(){
+  const rows = filteredZaznamy();
+  if(!rows.length){ toast('Nic k exportu – uprav filtr'); return; }
+  toast('⏳ Generuji Excel…', 5000);
+  try{
+    if(typeof ExcelJS==='undefined') await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+  }catch(e){ alert('Nepodařilo se načíst generátor Excelu (je potřeba internet).'); return; }
+
+  const sorted = rows.slice().sort((a,b)=> a.datum<b.datum?-1:(a.datum>b.datum?1:0));
+  const strojNames = [...new Set(sorted.map(r=>r.strojNazev).filter(Boolean))];
+  const strojLabel = strojNames.length===1 ? strojNames[0] : (strojNames.length+' strojů');
+  const strojnikNames = [...new Set(sorted.map(r=>r.strojnikJmeno).filter(Boolean))];
+  const strojnikLabel = strojnikNames.length===1 ? strojnikNames[0] : '';
+  const ds = sorted.map(r=>r.datum);
+  const obdobi = ds.length ? (isoToCz(ds[0])+' – '+isoToCz(ds[ds.length-1])) : '';
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Desetidenka');
+  ws.columns = [{width:9},{width:30},{width:14},{width:8},{width:10},{width:11}];
+  const thin = {style:'thin'};
+  const border = {top:thin,left:thin,bottom:thin,right:thin};
+  function title(rIdx, txt, opts){
+    ws.mergeCells('A'+rIdx+':F'+rIdx);
+    const c = ws.getCell('A'+rIdx); c.value = txt;
+    c.alignment = {horizontal:(opts&&opts.al)||'center'};
+    if(opts&&opts.bold) c.font = {bold:true, size:(opts&&opts.size)||11};
+  }
+  title(1,'M - SILNICE a.s.',{bold:true,size:12});
+  title(2,'DESETIDENNÍ VÝKAZ O PRÁCI STAVEBNÍHO STROJE',{bold:true,size:12});
+  title(3,'Stroj: '+strojLabel,{bold:true,al:'left'});
+  title(4,'Období: '+obdobi+(strojnikLabel?'      Strojník: '+strojnikLabel:''),{al:'left'});
+
+  const hdr = ['DNE','STAVBA','Stav počítadla','Mth','Hodiny','Tankování'];
+  const hr = ws.getRow(6);
+  hdr.forEach((h,i)=>{ const c=hr.getCell(i+1); c.value=h; c.font={bold:true}; c.alignment={horizontal:'center',wrapText:true}; c.border=border; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFEFEFEF'}}; });
+
+  let row = 7;
+  sorted.forEach(z=>{
+    const r = ws.getRow(row);
+    const vals = [
+      isoToCz(z.datum).replace(/\.(\d{4})$/,'.'),
+      z.stavbaText||'',
+      z.stavCitadla!=null?z.stavCitadla:'',
+      z.mth!=null?round1(z.mth):'',
+      recHodiny(z)||'',
+      z.tankoval?'X':''
+    ];
+    vals.forEach((v,i)=>{ const c=r.getCell(i+1); c.value=v; c.border=border; c.alignment={horizontal:i===1?'left':'center'}; });
+    row++;
+  });
+  const totMth = round1(sorted.reduce((s,z)=>s+(Number(z.mth)||0),0));
+  const tr = ws.getRow(row);
+  tr.getCell(2).value='Mth celkem:'; tr.getCell(2).font={bold:true}; tr.getCell(2).alignment={horizontal:'right'};
+  tr.getCell(4).value=totMth; tr.getCell(4).font={bold:true}; tr.getCell(4).border=border; tr.getCell(4).alignment={horizontal:'center'};
+  row += 2;
+
+  const startV = sorted.length && sorted[0].stavZacatek!=null ? sorted[0].stavZacatek : '';
+  const endV   = sorted.length && sorted[sorted.length-1].stavCitadla!=null ? sorted[sorted.length-1].stavCitadla : '';
+  ws.getCell('B'+row).value='Stav počítadla MTh – začátek:'; ws.getCell('C'+row).value=startV; row++;
+  ws.getCell('B'+row).value='Stav počítadla MTh – konec:';   ws.getCell('C'+row).value=endV;   row+=2;
+
+  ws.getCell('B'+row).value='Součet motohodin po stavbách:'; ws.getCell('B'+row).font={bold:true}; row++;
+  const bySt={}; sorted.forEach(z=>{const k=z.stavbaText||'(bez stavby)'; bySt[k]=(bySt[k]||0)+(Number(z.mth)||0);});
+  Object.keys(bySt).sort().forEach(k=>{ ws.getCell('B'+row).value=k; ws.getCell('C'+row).value=round1(bySt[k])+' mth'; row++; });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'desetidenka_'+(strojNames.length===1?slug(strojNames[0]):'vykaz')+'_'+(ds[0]||'')+'.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('✓ Excel stažen');
+}
 
 /* ════════════════════════════════════════════════════════════════════
    8) ČÍSELNÍKY (jen vedoucí/admin) – Stroje / Stavby / Strojníci
@@ -1129,7 +1223,9 @@ function ciselnikStroje(){
           <div class="le-title">${escapeHtml(s.nazev)}</div>
           <div class="le-sub">${escapeHtml(s.typ||'')}${s.spz?' · '+escapeHtml(s.spz):''}${s.lastMoto!=null?' · počítadlo '+s.lastMoto:''}</div>
         </div>
+        <button class="secondary" onclick="renameCiselnik('stroje','${s.id}','nazev')">✏</button>
         <button class="secondary" onclick="toggleAktiv('stroje','${s.id}',${s.aktivni===false})">${s.aktivni===false?'Obnovit':'Skrýt'}</button>
+        <button class="danger" onclick="deleteCiselnik('stroje','${s.id}')">🗑</button>
       </div>`).join('') || '<div class="empty-msg">Zatím žádný stroj.</div>'}`;
 }
 async function addStroj(){
@@ -1158,7 +1254,9 @@ function ciselnikStavby(){
           <div class="le-title">${escapeHtml(s.kod||s.nazev)}</div>
           ${s.nazev&&s.nazev!==s.kod?`<div class="le-sub">${escapeHtml(s.nazev)}</div>`:''}
         </div>
+        <button class="secondary" onclick="renameCiselnik('stavby','${s.id}','kod')">✏</button>
         <button class="secondary" onclick="toggleAktiv('stavby','${s.id}',${s.aktivni===false})">${s.aktivni===false?'Obnovit':'Skrýt'}</button>
+        <button class="danger" onclick="deleteCiselnik('stavby','${s.id}')">🗑</button>
       </div>`).join('') || '<div class="empty-msg">Zatím žádná stavba.</div>'}`;
 }
 async function addStavba(){
@@ -1180,15 +1278,33 @@ function ciselnikStrojnici(){
       <p class="help">Strojník se pak přihlásí výběrem svého jména. PIN je nepovinný.</p>
     </div>
     ${list.map(s=>`
-      <div class="list-edit ${s.aktivni===false?'inactive':''}">
-        <div class="le-main">
-          <div class="le-title">${escapeHtml(s.jmeno)} ${s.role==='admin'?'<span style="color:var(--accent2);font-size:12px;">★</span>':''}</div>
+      <div class="list-edit ${s.aktivni===false?'inactive':''}" style="flex-wrap:wrap;">
+        <div class="le-main" style="flex-basis:100%;">
+          <div class="le-title">${escapeHtml(s.jmeno)} ${s.role==='admin'?'<span style="color:var(--accent2);font-size:12px;">★ vedoucí</span>':''}</div>
           <div class="le-sub">${s.claimedUid?'přihlášen':'nepřihlášen'}${s.pinHash?' · PIN':''}</div>
         </div>
+        <button class="secondary" onclick="renameStrojnik('${s.id}')">✏ Přejmenovat</button>
         <button class="secondary" onclick="setPin('${s.id}')">PIN</button>
         ${s.claimedUid?`<button class="secondary" onclick="unclaim('${s.id}')">Odpojit</button>`:''}
-        <button class="secondary" onclick="toggleRole('${s.id}','${s.role||'strojnik'}')">${s.role==='admin'?'➖admin':'➕admin'}</button>
+        <button class="secondary" onclick="toggleRole('${s.id}','${s.role||'strojnik'}')">${s.role==='admin'?'➖ admin':'➕ admin'}</button>
+        ${s.id!==state.me.id?`<button class="danger" onclick="deleteStrojnik('${s.id}')">🗑 Smazat</button>`:''}
       </div>`).join('')}`;
+}
+async function renameStrojnik(id){
+  const s = state.strojnici.find(x=>x.id===id); if(!s) return;
+  const nove = prompt('Nové jméno strojníka:', s.jmeno||'');
+  if(nove==null) return;
+  const j = nove.trim(); if(j.length<2){ toast('Příliš krátké jméno'); return; }
+  await db.collection('strojnici').doc(id).update({ jmeno:j });
+  toast('✓ Přejmenováno');
+}
+async function deleteStrojnik(id){
+  const s = state.strojnici.find(x=>x.id===id); if(!s) return;
+  if(s.id===state.me.id){ toast('Sám sebe nelze smazat'); return; }
+  if(!confirm('Smazat strojníka „'+(s.jmeno||'')+'"? Jeho zapsané dny zůstanou (s jeho jménem).')) return;
+  if(s.claimedUid) await db.collection('uids').doc(s.claimedUid).delete().catch(()=>{});
+  await db.collection('strojnici').doc(id).delete();
+  toast('🗑 Smazáno');
 }
 async function addStrojnik(){
   const jmeno=(document.getElementById('np-jmeno').value||'').trim();
@@ -1219,6 +1335,20 @@ async function toggleRole(id, role){
 }
 async function toggleAktiv(coll, id, makeActive){
   await db.collection(coll).doc(id).update({ aktivni: !!makeActive });
+}
+async function deleteCiselnik(coll, id){
+  if(!confirm('Opravdu smazat? Zapsané dny zůstanou.')) return;
+  await db.collection(coll).doc(id).delete();
+  toast('🗑 Smazáno');
+}
+async function renameCiselnik(coll, id, field){
+  const arr = coll==='stroje' ? state.stroje : state.stavby;
+  const it = arr.find(x=>x.id===id); if(!it) return;
+  const nove = prompt('Nový název:', it[field]||'');
+  if(nove==null) return;
+  const v = nove.trim(); if(v.length<2){ toast('Příliš krátké'); return; }
+  await db.collection(coll).doc(id).update({ [field]: v });
+  toast('✓ Přejmenováno');
 }
 
 /* ════════════════════════════════════════════════════════════════════
