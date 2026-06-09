@@ -343,7 +343,13 @@ function render(){
   (map[r.view] || renderHome)(r.params);
   window.scrollTo(0,0);
 }
-function rerender(){ if(routeStack.length) render(); }
+function rerender(){
+  if(!routeStack.length) return;
+  // Nepřekresluj rozepsaný denní formulář kvůli cizí změně na pozadí
+  // (jinak by se smazal rozepsaný vstup). Připomínky mají vlastní onSnapshot.
+  if(routeStack[routeStack.length-1].view === 'den') return;
+  render();
+}
 
 /* ════════════════════════════════════════════════════════════════════
    3) SETUP (Firebase není nakonfigurován)
@@ -1112,12 +1118,13 @@ function startFirebase(){
   db = firebase.firestore();
   db.enablePersistence({ synchronizeTabs:true }).catch(()=>{});
 
+  // Jediné přihlášení – onAuthStateChanged se postará o anonymní sign-in,
+  // pokud uživatel ještě není přihlášený. (Dvojí volání by mohlo přepnout uid.)
   auth.onAuthStateChanged(user => {
     if(!user){ auth.signInAnonymously().catch(e=>{ alert('Přihlášení selhalo: '+e.message); }); return; }
     state.uid = user.uid;
     subscribeAll();
   });
-  auth.signInAnonymously().catch(e=>{ console.error(e); });
 }
 
 function subscribeAll(){
