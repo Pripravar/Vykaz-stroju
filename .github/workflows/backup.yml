@@ -1,0 +1,27 @@
+name: Noční záloha Firestore
+
+on:
+  schedule:
+    # 00:00 UTC = cca 01:00–02:00 v ČR (každou noc)
+    - cron: '0 0 * * *'
+  workflow_dispatch: {}   # umožní spustit i ručně z karty Actions
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install firebase-admin@12
+      - name: Export Firestore do JSON
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/backup.js
+      - name: Ulož zálohu jako artifact (neveřejné, drží se 90 dní)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firestore-zaloha-${{ github.run_id }}
+          path: backups/
+          retention-days: 90

@@ -3,3 +3,6 @@ node_modules/
 *.log
 .idea/
 .vscode/
+# Zálohy obsahují osobní data – NIKDY je necommituj do veřejného repa
+backups/
+package-lock.json

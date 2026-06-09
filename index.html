@@ -202,6 +202,25 @@ table.report td.num { text-align:right; font-variant-numeric:tabular-nums; }
 
 .inactive { opacity:0.45; }
 
+/* Vlastní našeptávač (nahrazuje nativní datalist, který splýval s pozadím) */
+.ac-wrap { position:relative; }
+.ac-box {
+  position:absolute; left:0; right:0; top:100%; z-index:60;
+  background:#13294e; border:1px solid var(--accent); border-top:none;
+  border-radius:0 0 8px 8px; max-height:220px; overflow-y:auto;
+  display:none; box-shadow:0 8px 18px rgba(0,0,0,0.5);
+}
+.ac-box.show { display:block; }
+.ac-item { padding:11px 12px; cursor:pointer; color:var(--text);
+  border-bottom:1px solid var(--border); font-size:15px; }
+.ac-item:last-child { border-bottom:none; }
+.ac-item:hover, .ac-item.active { background:var(--accent); color:#fff; }
+
+.field-hint { font-size:12px; color:var(--text2); margin-top:4px; }
+.field-hint b { color:var(--accent2); }
+.take-over { background:var(--panel2); color:var(--accent2); border:1px solid var(--accent2);
+  padding:7px 10px; font-size:12px; font-weight:600; border-radius:8px; margin-top:6px; }
+
 @media print {
   body { background:#fff; color:#000; }
   header, .no-print, .month-banner, .chips, .tabs, button { display:none !important; }
@@ -318,6 +337,33 @@ function strojManualSuggestions(){
 // Jsem autor záznamu / admin?
 function canEditRecord(z){ return !z || z.ownerUid===state.uid || (state.me && state.me.role==='admin'); }
 
+// Vlastní našeptávač – plně ostylovaný (nativní datalist na telefonu splýval).
+function attachAutocomplete(inputId, boxId, items){
+  const inp = document.getElementById(inputId);
+  const box = document.getElementById(boxId);
+  if(!inp || !box) return;
+  function show(){
+    const q = slug(inp.value.trim());
+    let list = items;
+    if(q) list = items.filter(v => slug(v).includes(q));
+    list = list.slice(0,8);
+    if(!list.length || (list.length===1 && slug(list[0])===q)){ box.classList.remove('show'); box.innerHTML=''; return; }
+    box.innerHTML = list.map(v=>`<div class="ac-item">${escapeHtml(v)}</div>`).join('');
+    box.classList.add('show');
+    [...box.children].forEach((el,i)=>{
+      el.addEventListener('mousedown', e=>{
+        e.preventDefault();
+        inp.value = list[i];
+        box.classList.remove('show');
+        inp.dispatchEvent(new Event('input',{bubbles:true}));
+      });
+    });
+  }
+  inp.addEventListener('input', show);
+  inp.addEventListener('focus', show);
+  inp.addEventListener('blur', ()=> setTimeout(()=>box.classList.remove('show'),150));
+}
+
 /* poslední stav počítadla daného stroje PŘED daným dnem (napříč strojníky) */
 function prevMoto(strojKey, datum){
   const recs = state.zaznamy
@@ -394,9 +440,30 @@ function renderLogin(){
             <span>${escapeHtml(s.jmeno)}${s.role==='admin'?' <span style="font-size:12px;color:var(--accent2);">★ vedoucí</span>':''}</span>
           </button>`).join('')}
       </div>
-      <p class="help">Své jméno tu nevidíš? Přidá ho vedoucí v sekci Číselníky → Strojníci.</p>`;
+      <div class="card">
+        <h2>Nejsi v seznamu? Přidej se</h2>
+        <label>Jméno a příjmení</label>
+        <input id="self-name" placeholder="např. Jan Novák" autocomplete="name">
+        <button class="full green" style="margin-top:10px;" onclick="addSelf()">➕ Přidat se a přihlásit</button>
+      </div>`;
   }
   document.getElementById('main').innerHTML = inner;
+}
+
+async function addSelf(){
+  const jmeno = (document.getElementById('self-name').value||'').trim();
+  if(jmeno.length < 2){ toast('Zadej jméno'); return; }
+  const exists = state.strojnici.find(s => slug(s.jmeno)===slug(jmeno));
+  if(exists){ toast('Toto jméno už existuje – vyber ho ze seznamu'); return; }
+  try{
+    const id = uid('strojnik');
+    await db.collection('strojnici').doc(id).set({
+      jmeno, role:'strojnik', aktivni:true, claimedUid: state.uid, pinHash:null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
+    toast('✓ Vítej, '+jmeno);
+  }catch(e){ alert('Nepodařilo se přidat: '+e.message); }
 }
 
 async function createFirstPerson(){
@@ -527,7 +594,7 @@ function renderDen(params){
         <div class="le-sub" style="margin-bottom:10px;">✍ Zapsal: <b style="color:var(--text);">${escapeHtml(r.strojnikJmeno||'?')}</b></div>
         <div class="stavba-sum"><span>Stroj</span><b>${escapeHtml(r.strojNazev||'')}</b></div>
         <div class="stavba-sum"><span>Stavba</span><b>${escapeHtml(r.stavbaText||'')}</b></div>
-        <div class="stavba-sum"><span>Počítadlo</span><b>${r.stavCitadla!=null?r.stavCitadla:'–'}</b></div>
+        <div class="stavba-sum"><span>Počítadlo počáteční → konečný</span><b>${r.stavZacatek!=null?r.stavZacatek:'–'} → ${r.stavCitadla!=null?r.stavCitadla:'–'}</b></div>
         <div class="stavba-sum"><span>Motohodiny</span><b>${r.mth!=null?round1(r.mth).toFixed(1)+' mth':'–'}</b></div>
         ${(r.hodOd||r.hodDo)?`<div class="stavba-sum"><span>Hodiny</span><b>${r.hodOd||''}–${r.hodDo||''}</b></div>`:''}
         <div class="stavba-sum"><span>Tankování</span><b>${r.tankoval?'⛽ ano':'ne'}</b></div>
@@ -540,10 +607,13 @@ function renderDen(params){
   }
 
   const strojeAkt = state.stroje.filter(s=>s.aktivni!==false);
+  const learnedManual = strojManualSuggestions();
+  const existingManualName = existing && existing.strojRucni ? (existing.strojNazev||'') : '';
   const strojOptions = strojeAkt.map(s =>
     `<option value="${s.id}" ${existing && existing.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}${s.spz?' ('+escapeHtml(s.spz)+')':''}</option>`).join('');
-  const stavbyOptions = stavbaSuggestions().map(v => `<option value="${escapeHtml(v)}">`).join('');
-  const strojManualOptions = strojManualSuggestions().map(v => `<option value="${escapeHtml(v)}">`).join('');
+  const manualOptions = learnedManual.map(n =>
+    `<option value="man:${escapeHtml(n)}" ${slug(existingManualName)===slug(n)?'selected':''}>${escapeHtml(n)} — ručně</option>`).join('');
+  const manualNew = existing && existing.strojRucni && !learnedManual.some(n=>slug(n)===slug(existingManualName));
   const autor = existing ? existing.strojnikJmeno : state.me.jmeno;
 
   document.getElementById('main').innerHTML = `
@@ -555,7 +625,7 @@ function renderDen(params){
       <div class="le-sub" style="margin-bottom:10px;">✍ Zapisuje: <b style="color:var(--text);">${escapeHtml(autor)}</b>${existing&&existing.ownerUid!==state.uid?' (upravuje admin)':''}</div>
       <div class="row" style="display:block;">
         <label>Datum</label>
-        <input id="f-datum" type="date" value="${datum}" onchange="updateMth();checkConflict();">
+        <input id="f-datum" type="date" value="${datum}" onchange="setStartDefault(true);updateMth();checkConflict();">
       </div>
 
       <div class="row" style="display:block;">
@@ -563,44 +633,62 @@ function renderDen(params){
         <select id="f-stroj" onchange="onStrojChange()">
           <option value="">— vyber stroj —</option>
           ${strojOptions}
-          <option value="__manual__" ${manual?'selected':''}>✏️ napsat ručně…</option>
+          ${manualOptions}
+          <option value="__manual__" ${manualNew?'selected':''}>✏️ napsat nový ručně…</option>
         </select>
-        <input id="f-strojManual" list="stroj-manual-list" placeholder="napiš název stroje" style="margin-top:8px; display:${manual?'block':'none'};" value="${manual?escapeHtml(existing.strojNazev||''):''}" oninput="updateMth();checkConflict();">
-        <datalist id="stroj-manual-list">${strojManualOptions}</datalist>
+        <div class="ac-wrap" id="f-strojManual-wrap" style="margin-top:8px; display:${manualNew?'block':'none'};">
+          <input id="f-strojManual" placeholder="napiš název stroje" value="${manualNew?escapeHtml(existingManualName):''}" autocomplete="off" oninput="onManualInput()">
+          <div class="ac-box" id="f-strojManual-box"></div>
+        </div>
       </div>
 
       <div id="day-conflict" class="moto-hint warn" style="margin:0 0 6px;"></div>
 
       <div class="row" style="display:block;">
         <label>Stavba</label>
-        <input id="f-stavba" list="stavby-list" placeholder="začni psát… (např. Marti → Martinovice)" value="${escapeHtml(r.stavbaText||'')}">
-        <datalist id="stavby-list">${stavbyOptions}</datalist>
-      </div>
-
-      <div class="row" style="display:block;">
-        <label>Stav počítadla motohodin</label>
-        <input id="f-stav" type="number" step="0.1" inputmode="decimal" placeholder="např. 7591" value="${r.stavCitadla!=null?r.stavCitadla:''}" oninput="updateMth()">
-        <div class="moto-hint" id="moto-hint"></div>
+        <div class="ac-wrap">
+          <input id="f-stavba" placeholder="začni psát… (např. Marti → Martinovice)" value="${escapeHtml(r.stavbaText||'')}" autocomplete="off">
+          <div class="ac-box" id="f-stavba-box"></div>
+        </div>
       </div>
     </div>
 
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h2>Stav počítadla motohodin</h2>
+      <div class="grid-2">
+        <div>
+          <label>Počáteční</label>
+          <input id="f-stav-zac" type="number" step="0.1" inputmode="decimal" placeholder="–" value="${existing && existing.stavZacatek!=null ? existing.stavZacatek : ''}" oninput="updateMth()">
+        </div>
+        <div>
+          <label>Konečný (dnešní)</label>
+          <input id="f-stav" type="number" step="0.1" inputmode="decimal" placeholder="např. 7591" value="${r.stavCitadla!=null?r.stavCitadla:''}" oninput="updateMth()">
+        </div>
+      </div>
+      <div class="field-hint" id="zac-hint"></div>
+      <button type="button" class="take-over" id="btn-prevzit" style="display:none;" onclick="setStartDefault(true);updateMth();"></button>
+      <div class="moto-hint" id="moto-hint" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Odpracované hodiny</h2>
+      <div class="grid-3">
+        <div><label>od</label><input id="f-od" type="time" value="${r.hodOd||''}" onchange="updateHod()"></div>
+        <div><label>do</label><input id="f-do" type="time" value="${r.hodDo||''}" onchange="updateHod()"></div>
+        <div><label>celkem</label><input id="f-hod" readonly value="${hoursDiff(r.hodOd,r.hodDo).toFixed(1)}" style="opacity:.7;"></div>
+      </div>
+      <p class="field-hint">Vyplň hodiny i počítadlo – appka porovná, jestli si někde nesedí (kontrola překlepu).</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
         <h2 style="margin:0;">Tankování</h2>
         <div class="toggle-yn" style="width:160px;">
           <button id="tank-no"  class="${r.tankoval?'off':''}" onclick="setTank(false)">Ne</button>
           <button id="tank-yes" class="${r.tankoval?'':'off'}" onclick="setTank(true)">⛽ Ano</button>
         </div>
       </div>
-      <details ${ (r.hodOd||r.hodDo) ? 'open':''}>
-        <summary style="cursor:pointer;color:var(--text2);font-size:13px;">+ Odpracované hodiny (od–do) – nepovinné</summary>
-        <div class="grid-3" style="margin-top:10px;">
-          <div><label>od</label><input id="f-od" type="time" value="${r.hodOd||''}" onchange="updateHod()"></div>
-          <div><label>do</label><input id="f-do" type="time" value="${r.hodDo||''}" onchange="updateHod()"></div>
-          <div><label>celkem</label><input id="f-hod" readonly value="${hoursDiff(r.hodOd,r.hodDo).toFixed(1)}" style="opacity:.7;"></div>
-        </div>
-      </details>
-      <div class="row" style="display:block;margin-top:10px;">
+      <div class="row" style="display:block;margin-top:12px;">
         <label>Poznámka k mému zápisu (nepovinné)</label>
         <input id="f-pozn" placeholder="" value="${escapeHtml(r.poznamka||'')}">
       </div>
@@ -615,6 +703,9 @@ function renderDen(params){
     ${poznamkyCardHtml(existing)}
   `;
   _tank = !!r.tankoval;
+  attachAutocomplete('f-stavba','f-stavba-box', stavbaSuggestions());
+  attachAutocomplete('f-strojManual','f-strojManual-box', learnedManual);
+  setStartDefault(false);
   updateMth();
   checkConflict();
   if(existing) loadPoznamky(existing.id);
@@ -642,34 +733,72 @@ function setTank(v){
   document.getElementById('tank-yes').className = v?'':'off';
   document.getElementById('tank-no').className  = v?'off':'';
 }
+function onManualInput(){ setStartDefault(true); updateMth(); checkConflict(); }
 function onStrojChange(){
   const v = document.getElementById('f-stroj').value;
-  document.getElementById('f-strojManual').style.display = (v==='__manual__')?'block':'none';
+  document.getElementById('f-strojManual-wrap').style.display = (v==='__manual__')?'block':'none';
+  setStartDefault(true);
   updateMth();
   checkConflict();
 }
 function updateHod(){
   document.getElementById('f-hod').value = hoursDiff(
     document.getElementById('f-od').value, document.getElementById('f-do').value).toFixed(1);
+  updateMth();
 }
 function currentStrojKey(){
   const sel = document.getElementById('f-stroj').value;
   if(sel==='__manual__'){ return 'man:'+slug(document.getElementById('f-strojManual').value); }
+  if(sel.indexOf('man:')===0){ return 'man:'+slug(sel.slice(4)); }
   if(sel){ return 'id:'+sel; }
   return null;
+}
+// Předvyplň počáteční stav z konečného stavu minulého zápisu téhož stroje.
+function setStartDefault(force){
+  const zac = document.getElementById('f-stav-zac');
+  if(!zac) return;
+  const hint = document.getElementById('zac-hint');
+  const btn  = document.getElementById('btn-prevzit');
+  const datum = document.getElementById('f-datum').value;
+  const strojKey = currentStrojKey();
+  const prev = strojKey ? prevMoto(strojKey, datum) : null;
+  if(prev){
+    if(force || zac.value===''){ zac.value = prev.stavCitadla; }
+    if(hint) hint.innerHTML = `Počáteční převzato z ${isoToCz(prev.datum)} (konečný stav <b>${prev.stavCitadla}</b>). Pokud nesedí, přepiš.`;
+    if(btn){ btn.style.display='inline-block'; btn.textContent='↩ Převzít minulý stav ('+prev.stavCitadla+')'; }
+  } else {
+    if(hint) hint.innerHTML = strojKey ? 'První zápis tohoto stroje – vyplň počáteční stav počítadla.' : 'Vyber stroj.';
+    if(btn) btn.style.display='none';
+  }
 }
 function updateMth(){
   const hint = document.getElementById('moto-hint');
   if(!hint) return;
-  const datum = document.getElementById('f-datum').value;
-  const strojKey = currentStrojKey();
-  const stav = parseFloat(document.getElementById('f-stav').value);
-  if(!strojKey || isNaN(stav)){ hint.className='moto-hint'; hint.innerHTML='Po zadání stroje a stavu počítadla se dopočítají motohodiny.'; return; }
-  const prev = prevMoto(strojKey, datum);
-  if(!prev){ hint.className='moto-hint'; hint.innerHTML='První zápis tohoto stroje – motohodiny za den = 0. Příště se počítají z rozdílu.'; return; }
-  const mth = round1(stav - prev.stavCitadla);
-  if(mth < 0){ hint.className='moto-hint warn'; hint.innerHTML=`⚠ Počítadlo (${stav}) je nižší než minule (${prev.stavCitadla} z ${isoToCz(prev.datum)}). Zkontroluj.`; }
-  else { hint.className='moto-hint'; hint.innerHTML=`Minule ${prev.stavCitadla} (${isoToCz(prev.datum)}) → dnes <b>${mth.toFixed(1)} mth</b>`; }
+  const start = parseFloat(document.getElementById('f-stav-zac').value);
+  const end   = parseFloat(document.getElementById('f-stav').value);
+  const hod   = hoursDiff(document.getElementById('f-od').value, document.getElementById('f-do').value);
+  if(isNaN(start) || isNaN(end)){
+    hint.className='moto-hint';
+    hint.innerHTML='Vyplň počáteční i konečný stav počítadla – spočítají se motohodiny.';
+    return;
+  }
+  const mth = round1(end - start);
+  if(mth < 0){
+    hint.className='moto-hint warn';
+    hint.innerHTML=`⚠ Konečný stav (${end}) je nižší než počáteční (${start}). Zkontroluj počítadlo.`;
+    return;
+  }
+  let html = `Motohodiny za den: <b>${mth.toFixed(1)} mth</b>`;
+  let cls = 'moto-hint';
+  if(hod > 0){
+    if(Math.abs(mth - hod) > Math.max(2, mth*0.5)){
+      cls = 'moto-hint warn';
+      html += ` &nbsp;⚠ odpracováno ${hod.toFixed(1)} h se výrazně liší – zkontroluj, jestli ses nepřeťukl.`;
+    } else {
+      html += ` &nbsp;· odpracováno ${hod.toFixed(1)} h ✓`;
+    }
+  }
+  hint.className = cls; hint.innerHTML = html;
 }
 
 function copyYesterday(){
@@ -678,22 +807,22 @@ function copyYesterday(){
   const last = mine[0];
   const sel = document.getElementById('f-stroj');
   if(last.strojId && state.stroje.some(s=>s.id===last.strojId)){
-    sel.value = last.strojId; onStrojChange();
+    sel.value = last.strojId;
   } else if(last.strojNazev){
-    sel.value = '__manual__'; onStrojChange();
-    document.getElementById('f-strojManual').value = last.strojNazev;
+    const opt = [...sel.options].find(o => o.value.indexOf('man:')===0 && slug(o.value.slice(4))===slug(last.strojNazev));
+    sel.value = opt ? opt.value : '__manual__';
   }
+  onStrojChange();
+  if(sel.value==='__manual__' && last.strojNazev) document.getElementById('f-strojManual').value = last.strojNazev;
   document.getElementById('f-stavba').value = last.stavbaText || '';
-  if(last.hodOd||last.hodDo){
-    const det = document.querySelector('details'); if(det) det.open = true;
-    document.getElementById('f-od').value = last.hodOd||'';
-    document.getElementById('f-do').value = last.hodDo||'';
-    updateHod();
-  }
+  document.getElementById('f-od').value = last.hodOd||'';
+  document.getElementById('f-do').value = last.hodDo||'';
+  updateHod();
   setTank(!!last.tankoval);
+  setStartDefault(true);
   document.getElementById('f-stav').focus();
   updateMth();
-  toast('✓ Předvyplněno z '+isoToCz(last.datum)+' – uprav počítadlo');
+  toast('✓ Předvyplněno z '+isoToCz(last.datum)+' – uprav konečný stav počítadla');
 }
 
 async function saveDen(){
@@ -705,6 +834,8 @@ async function saveDen(){
     strojNazev = (document.getElementById('f-strojManual').value||'').trim();
     strojRucni = true;
     if(!strojNazev){ toast('Napiš název stroje'); return; }
+  } else if(sel.indexOf('man:')===0){
+    strojNazev = sel.slice(4); strojRucni = true;
   } else if(sel){
     const s = state.stroje.find(x=>x.id===sel);
     if(!s){ toast('Vyber stroj'); return; }
@@ -713,22 +844,21 @@ async function saveDen(){
 
   const stavbaText = (document.getElementById('f-stavba').value||'').trim();
   const stavbaMatch = state.stavby.find(s => (s.kod||s.nazev)===stavbaText);
-  const stavStr = document.getElementById('f-stav').value;
-  const stavCitadla = stavStr==='' ? null : Number(stavStr);
-  const hodOd = document.getElementById('f-od') ? document.getElementById('f-od').value : '';
-  const hodDo = document.getElementById('f-do') ? document.getElementById('f-do').value : '';
+  const zacStr = document.getElementById('f-stav-zac').value;
+  const stavZacatek = zacStr==='' ? null : Number(zacStr);
+  const endStr = document.getElementById('f-stav').value;
+  const stavCitadla = endStr==='' ? null : Number(endStr);
+  const hodOd = document.getElementById('f-od').value;
+  const hodDo = document.getElementById('f-do').value;
   const poznamka = (document.getElementById('f-pozn').value||'').trim();
 
   if(stavCitadla==null && !stavbaText && !hodOd){ toast('Vyplň aspoň stavbu nebo počítadlo'); return; }
 
   const strojKey = strojId ? ('id:'+strojId) : ('man:'+slug(strojNazev));
   let mth = 0;
-  if(stavCitadla!=null){
-    const prev = prevMoto(strojKey, datum);
-    if(prev){
-      mth = round1(stavCitadla - prev.stavCitadla);
-      if(mth < 0 && !confirm('Počítadlo je nižší než minule – motohodiny vyjdou záporně. Uložit i tak?')) return;
-    }
+  if(stavCitadla!=null && stavZacatek!=null){
+    mth = round1(stavCitadla - stavZacatek);
+    if(mth < 0 && !confirm('Konečný stav je nižší než počáteční – motohodiny vyjdou záporně. Uložit i tak?')) return;
   }
 
   // Editace existujícího → zachovej jeho ID a původního autora (i když ho mění admin).
@@ -747,7 +877,7 @@ async function saveDen(){
     ownerUid,
     stavbaId: stavbaMatch ? stavbaMatch.id : null,
     stavbaText,
-    stavCitadla, mth,
+    stavZacatek, stavCitadla, mth,
     hodOd, hodDo, tankoval: !!_tank,
     poznamka,
     upravilJmeno: state.me.jmeno,
@@ -888,6 +1018,7 @@ function renderPrehled(){
       <td>${escapeHtml(z.strojNazev||'')}</td>
       <td>${escapeHtml(z.strojnikJmeno||'')}</td>
       <td>${escapeHtml(z.stavbaText||'')}</td>
+      <td class="num">${z.stavZacatek!=null?z.stavZacatek:''}</td>
       <td class="num">${z.stavCitadla!=null?z.stavCitadla:''}</td>
       <td class="num">${z.mth!=null?round1(z.mth).toFixed(1):''}</td>
       <td>${z.hodOd&&z.hodDo?z.hodOd+'–'+z.hodDo:''}</td>
@@ -923,7 +1054,7 @@ function renderPrehled(){
       <table class="report">
         <thead><tr>
           <th>Datum</th><th>Stroj</th><th>Strojník</th><th>Stavba</th>
-          <th>Počítadlo</th><th>Mth</th><th>Hodiny</th><th>⛽</th>
+          <th>Poč.</th><th>Konec</th><th>Mth</th><th>Hodiny</th><th>⛽</th>
         </tr></thead>
         <tbody>${tableRows||''}</tbody>
       </table>
@@ -939,12 +1070,12 @@ function renderPrehled(){
 function exportCSV(){
   const onlyMine = state.me.role!=='admin';
   const rows = filteredZaznamy().filter(z => onlyMine ? z.strojnikId===state.me.id : true);
-  const head = ['Datum','Stroj','Strojnik','Stavba','Stav pocitadla','Mth','Od','Do','Tankovani','Poznamka'];
+  const head = ['Datum','Stroj','Strojnik','Stavba','Pocatecni','Konecny','Mth','Od','Do','Tankovani','Poznamka'];
   const lines = [head.join(';')];
   rows.forEach(z=>{
     lines.push([
       z.datum, csv(z.strojNazev), csv(z.strojnikJmeno), csv(z.stavbaText),
-      z.stavCitadla!=null?z.stavCitadla:'', z.mth!=null?round1(z.mth):'',
+      z.stavZacatek!=null?z.stavZacatek:'', z.stavCitadla!=null?z.stavCitadla:'', z.mth!=null?round1(z.mth):'',
       z.hodOd||'', z.hodDo||'', z.tankoval?'ano':'', csv(z.poznamka)
     ].join(';'));
   });
@@ -1093,17 +1224,27 @@ async function toggleAktiv(coll, id, makeActive){
 /* ════════════════════════════════════════════════════════════════════
    9) START – Firebase init, auth, realtime subscriptions
    ════════════════════════════════════════════════════════════════════ */
+// Zajisti, že přihlášené zařízení má mapování uids → strojník
+// (pravidla podle něj poznají admina; samoopraví i starší účty bez mapování).
+function ensureUidDoc(){
+  if(state.me && state.uid){
+    db.collection('uids').doc(state.uid).set({ strojnikId: state.me.id }, { merge:true }).catch(()=>{});
+  }
+}
+
 function decideStart(){
   if(state.started) return;
   if(!state.loaded.strojnici) return;
   state.started = true;
   state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
+  ensureUidDoc();
   setRoot(state.me ? 'home' : 'login');
 }
 
 function watchAuthState(){
   const prevMeId = state.me ? state.me.id : null;
   state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
+  ensureUidDoc();
   const meId = state.me ? state.me.id : null;
   if(prevMeId !== meId){
     setRoot(state.me ? 'home' : 'login');
