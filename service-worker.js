@@ -1,19 +1,15 @@
-// Service Worker - jednoduchý offline cache pro PWA
-// Verze cache - při aktualizaci souborů zvyšte číslo, aby se cache obnovila
-const CACHE = 'vykaz-stroju-v1';
+// Service Worker - offline cache pro PWA (app shell).
+// Verze cache - při změně index.html zvyš číslo, aby se cache obnovila.
+const CACHE = 'desetidenka-v2';
 
 const ASSETS = [
   './',
   './index.html',
-  './manifest.json',
-  './sablona/Vykaz_stavebniho_stroje_sablona.xlsx',
-  'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'
+  './manifest.json'
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {}))
-  );
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {})));
   self.skipWaiting();
 });
 
@@ -28,12 +24,20 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if(e.request.method !== 'GET') return;
+  const url = e.request.url;
+
+  // Firebase / Google API požadavky NIKDY necachuj - Firestore má vlastní
+  // offline synchronizaci a cache by ji rozbila.
+  if(/firestore|googleapis|firebaseio|identitytoolkit|google\.com|gstatic\.com\/firebasejs/.test(url)){
+    return; // nech projít přímo na síť
+  }
+
+  // App shell: cache-first, ostatní (same-origin) network s fallbackem do cache.
   e.respondWith(
     caches.match(e.request).then(cached => {
       if(cached) return cached;
       return fetch(e.request).then(resp => {
-        // cache odpovědi z naší origin / CDN
-        if(resp && resp.status === 200) {
+        if(resp && resp.status === 200 && new URL(url).origin === location.origin){
           const copy = resp.clone();
           caches.open(CACHE).then(c => c.put(e.request, copy)).catch(()=>{});
         }

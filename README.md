@@ -1,96 +1,116 @@
-# Výkaz stroje – desetidenka
+# Desetidenka strojů (v0.2)
 
-Mobilní webová aplikace (PWA) pro vyplňování desetidenního výkazu o práci stavebního stroje. Výstup je Excel ve formátu „Výkaz stavebního stroje“ M-SILNICE a.s., OZ Praha – stejný tiskopis, jako se používá dnes.
+Mobilní webová aplikace (PWA) pro rychlé vyplňování **desetidenního výkazu o práci stavebního stroje**. Strojník se přihlásí svým jménem, vybere stroj na daný den a zapíše stav počítadla – jeden den do **15 sekund**. Data tečou do **cloudu (Firebase, projekt `vykazy-stroju`)**, takže vedoucí mechanizace vidí vše živě.
 
-## Co to umí (v0.1)
+## Hlavní vlastnosti
 
-- Bez přihlašování - po otevření je hned seznam strojů
-- Volitelné jméno strojníka (objeví se v Excelu jako „Řidič") - klikni na kartu „Strojník" nebo na ⚙ v záhlaví
-- Vlastní katalog strojů (válec, finišer, nákladní auto, kropice, čelní nakladač, bagr, grejdr, fréza, …)
-- Denní záznam: stavba, popis práce, množství, km, hodiny posádky/stroje, rozpad hodin (nezaj., opravy, údržba, přesuny, jiné), spotřeba PHM (benzin, nafta, olej)
-- Přehled dekády (10 dnů) s automatickými součty
-- Motohodiny – stav na zač. a konci dekády
-- Export do .xlsx ve formátu „Výkaz stavebního stroje“ – jen vyplní existující tiskopis
-- Funguje **offline** (PWA, service worker)
-- Lze „nainstalovat" na plochu telefonu (iPhone: Sdílet → Přidat na plochu; Android: nabídka „Přidat na plochu")
+- **Přihlášení jménem** – strojník jen klikne na své jméno ze seznamu (volitelný PIN). Žádná hesla, žádné SMS.
+- **Stroj se vybírá pro daný den** – ze společného číselníku, nebo se napíše ručně (našeptávač). Strojníci nemají stálý stroj.
+- **Rychlý zápis dne** – stavba · stav počítadla · tankování ano/ne (hodiny od–do nepovinně). Motohodiny (Mth) se **dopočítají z rozdílu počítadla**.
+- **„Jako včera"** – jedním tlačítkem předvyplní včerejší den, stačí změnit počítadlo.
+- **Našeptávač staveb** – učí se ze zadaných akcí (napíšeš „Marti" → nabídne „Martinovice").
+- **Vidět autora** – u každého záznamu je vidět, kdo ho zapsal.
+- **Nepřepsatelnost** – záznam je klíčovaný `strojník__stroj__den`. Cizí záznam nikdo nepřepíše; oprava = **nový samostatný záznam** (appka na konflikt upozorní). Mazat smí jen autor nebo administrátor.
+- **Připomínky k záznamu** – ke **kterémukoli** záznamu může **kdokoli** přidat připomínku (podepsanou jménem), aniž by měnil data záznamu. Cizí připomínku smaže jen její autor nebo admin.
+- **Přehled / desetidenka pro vedoucího** – filtry (stroj, stavba, strojník, období) + **součty motohodin po stavbách** + export CSV a tisk/PDF.
+- **Funguje offline** (PWA) a sám se po připojení synchronizuje.
 
-## Co zatím **neumí** (přijde ve v0.2)
+### Motohodiny – jak se počítají
 
-- Cloud (Firebase) – v0.1 ukládá data jen lokálně do telefonu (localStorage). Pokud strojník smaže prohlížeč, smaže si i data. **Pro reálný provoz je Firebase nezbytný.**
-- Sdílení mezi řidičem a vedoucím mechanizace
-- Digitální podpis (řidič / mistr / kontrola)
-- Hromadný export pro vedoucího mechanizace (více strojů × více dekád najednou)
-- Notifikace „nevyplnil jsi včerejšek"
+Počítadlo motohodin je na stroji, takže **kontinuita je per STROJ, ne per strojník**:
 
-## Jak to spustit lokálně
+```
+Mth(den) = stav počítadla(dnes) − stav počítadla(poslední dřívější zápis téhož stroje)
+```
 
-Stačí jakýkoli statický webserver. Nejjednodušší:
+Když stroj řídil jiný den jiný člověk, appka stejně najde poslední stav stroje od kohokoli. První zápis stroje má Mth = 0. Když počítadlo klesne, appka upozorní (překlep / výměna).
+
+---
+
+## Firebase je už nastavený
+
+Projekt **`vykazy-stroju`** (Spark plán) má hotovo: registrovanou web aplikaci (config je v `index.html`), zapnuté **Anonymous** přihlášení, **Firestore** databázi (region eur3) a publikovaná **pravidla** (viz níže). Není potřeba nic dalšího – stačí appku nasadit.
+
+### Firestore Rules (aktuálně publikované)
+
+Záznam smí upravit/smazat jen jeho autor nebo administrátor. Číselníky a stavy počítadel vidí všichni přihlášení (nutné pro výpočet Mth a přehled vedoucího). Připomínky může přidat kdokoli, ale cizí nepřepíše. Admina pravidla poznají přes pomocnou kolekci `uids` (mapuje zařízení → strojníka), kterou appka plní sama.
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){ return request.auth != null; }
+    function myStrojnikId(){
+      return get(/databases/$(database)/documents/uids/$(request.auth.uid)).data.strojnikId;
+    }
+    function isAdmin(){
+      return signedIn()
+        && exists(/databases/$(database)/documents/uids/$(request.auth.uid))
+        && get(/databases/$(database)/documents/strojnici/$(myStrojnikId())).data.role == 'admin';
+    }
+
+    match /uids/{uid} {
+      allow read:  if signedIn();
+      allow write: if signedIn() && uid == request.auth.uid;
+    }
+    match /strojnici/{id} { allow read, write: if signedIn(); }
+    match /stroje/{id}    { allow read, write: if signedIn(); }
+    match /stavby/{id}    { allow read, write: if signedIn(); }
+
+    match /zaznamy/{id} {
+      allow read:   if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+
+      // Připomínky – přidat smí kdokoli, smazat/upravit jen autor připomínky nebo admin.
+      match /poznamky/{pid} {
+        allow read:   if signedIn();
+        allow create: if signedIn() && request.resource.data.autorUid == request.auth.uid;
+        allow update, delete: if signedIn() && (resource.data.autorUid == request.auth.uid || isAdmin());
+      }
+    }
+  }
+}
+```
+
+---
+
+## První spuštění
+
+1. Otevři appku v telefonu.
+2. Není-li ještě žádný strojník, appka vyzve k vytvoření prvního jména → ten se stane **správcem (vedoucí)** ★.
+3. Vedoucí v **Číselníky** přidá stroje, stavby a ostatní strojníky.
+4. Strojníci se přihlásí výběrem svého jména.
+
+## Datový model (Firestore)
+
+| Kolekce | Co obsahuje |
+|---------|-------------|
+| `strojnici` | jméno, role (`strojnik`/`admin`), `claimedUid` (zařízení), `pinHash` |
+| `uids` | mapování `auth.uid` → `strojnikId` (pro rozpoznání admina v pravidlech) |
+| `stroje` | číselník: název, typ, SPZ, `lastMoto` (cache počítadla) |
+| `stavby` | číselník: kód, název |
+| `zaznamy` | **jeden den**: `${strojník}__${stroj}__${datum}` → datum, stroj, strojník, stavba, `stavCitadla`, `mth`, hodiny, tankování |
+| `zaznamy/{id}/poznamky` | připomínky k záznamu (text, autor, čas) |
+
+## Spuštění lokálně
 
 ```bash
 cd Vykaz-stroju
 python3 -m http.server 8000
-# otevřít http://localhost:8000
+# http://localhost:8000
 ```
 
-Nebo přes Node:
+## Nasazení (GitHub Pages)
 
-```bash
-npx serve .
-```
+Čistě statické. *Settings → Pages → Source = main, /(root)*. Po pár minutách běží na `https://pripravar.github.io/Vykaz-stroju/`.
 
-## Nasazení (deploy)
+## Co může přijít dál
 
-Aplikace je čistě statická (HTML + JS + XLSX šablona). Nasaditelná zdarma na:
-
-- **GitHub Pages** – v nastavení repa Settings → Pages → Source = main, /(root). Po pár minutách běží na `https://pripravar.github.io/Vykaz-stroju/`.
-- **Cloudflare Pages** – propojit repo, framework: žádný, build command: žádný, output dir: `.`.
-- **Vercel / Netlify** – stejně.
-- **Vlastní server / Firebase Hosting** (až se přidá Firebase).
-
-## Struktura souborů
-
-```
-Vykaz-stroju/
-├── index.html              # celá aplikace (UI + logika)
-├── manifest.json           # PWA manifest
-├── service-worker.js       # offline cache
-├── sablona/
-│   └── Vykaz_stavebniho_stroje_sablona.xlsx   # vzor tiskopisu, který se vyplňuje
-└── README.md
-```
-
-## Roadmap
-
-| Verze | Co přibude |
-|-------|------------|
-| v0.1  | Lokální PWA, formulář, export Excelu (dnes) |
-| v0.2  | Firebase Auth (SMS / e-mail), Firestore = sdílená data mezi řidičem a vedoucím |
-| v0.3  | Admin pro vedoucího mechanizace (web): přehled všech strojů, hromadný export, schvalovací workflow |
-| v0.4  | Digitální podpis, foto dokladů (tankování, počítadlo), notifikace |
-| v0.5  | API / napojení na účetní systém |
-
-## Mapování polí aplikace → Excel
-
-Export do `Vykaz_stavebniho_stroje_sablona.xlsx` plní tyto buňky:
-
-| Pole | Buňka |
-|------|-------|
-| Měsíc / dekáda | K3 |
-| Inv. číslo | N6 |
-| Řidič | T6 |
-| Datum (den) | A11–A20 |
-| Stavba | B11–B20 |
-| Popis | C11–C20 |
-| Množství | D11–D20 |
-| km | E11–E20 |
-| Posádka od / do / hodiny | F / G / H |
-| Stroj od / do / hodiny | I / J / K |
-| Rozpad (nezaj./opr.stav./opr.díl./údržba/přes./jiné) | L / M / N / O / P / Q |
-| PHM (benzin / nafta / mot.olej / ost.olej) | R / S / T / U |
-| Součty za dekádu | řádek 21 |
-| Motohodiny zač. / konec | N23 / N24 |
-
-Pokud vedoucí mechanizace najde, že hodnoty padají do špatných buněk, stačí upravit funkci `exportXlsx()` v `index.html` – mapování je tam přehledně v jedné sekci.
+- Automatický e-mail vedoucímu dopravy s reportem desetidenky (~2 dny po dekádě).
+- Export úředního Excelu „Výkaz stavebního stroje" (šablona v `sablona/`).
+- Fotky dokladů (tankování, počítadlo) přes Firebase Storage.
 
 ## Licence
 

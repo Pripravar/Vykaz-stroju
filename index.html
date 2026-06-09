@@ -3,18 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
-<title>Výkaz stroje – desetidenka</title>
+<title>Desetidenka strojů</title>
 
 <!-- PWA -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Výkaz stroje">
+<meta name="apple-mobile-web-app-title" content="Desetidenka">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#16213e">
 <link rel="manifest" href="manifest.json">
 
-<!-- ExcelJS - načte šablonu .xlsx, vyplní buňky a zachová formátování (rámečky, sloučené buňky, hlavičky) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<!-- Firebase (compat SDK – funguje v klasickém <script>, žádný build) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <style>
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -46,7 +48,7 @@ header button {
 }
 .btn-back { background:none !important; border:none !important; font-size:22px; padding:4px 6px; }
 
-main { padding:14px; max-width:760px; margin:0 auto; padding-bottom:40px; }
+main { padding:14px; max-width:820px; margin:0 auto; padding-bottom:40px; }
 .card {
   background:var(--panel); border:1px solid var(--border);
   border-radius:var(--radius); padding:14px; margin-bottom:12px;
@@ -59,14 +61,14 @@ label { display:block; font-size:11px; color:var(--text2);
         text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
 input, select, textarea {
   width:100%; background:var(--panel2); border:1px solid var(--border);
-  border-radius:8px; color:var(--text); padding:10px 12px; font-size:15px;
+  border-radius:8px; color:var(--text); padding:10px 12px; font-size:16px;
   font-family:inherit;
 }
 input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
 input[type=number] { -moz-appearance:textfield; }
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
-textarea { resize:vertical; min-height:60px; }
+textarea { resize:vertical; min-height:54px; }
 
 button {
   background:var(--accent); border:none; border-radius:8px;
@@ -86,11 +88,16 @@ button.full { width:100%; }
 .machine-card:active { border-color:var(--accent); }
 .machine-card .mc-title { font-size:16px; font-weight:700; margin-bottom:4px; }
 .machine-card .mc-meta { font-size:13px; color:var(--text2); }
-.machine-card .mc-status { display:inline-block; margin-top:8px; padding:3px 10px;
-                            border-radius:12px; font-size:11px; font-weight:600; }
-.status-ok { background:rgba(72,187,120,0.18); color:var(--green); }
-.status-warn { background:rgba(245,166,35,0.18); color:var(--accent2); }
-.status-empty { background:rgba(160,174,192,0.15); color:var(--text2); }
+
+.name-btn {
+  width:100%; text-align:left; background:var(--panel2); border:1px solid var(--border);
+  border-radius:10px; color:var(--text); padding:16px; margin-bottom:10px;
+  font-size:18px; font-weight:600; display:flex; align-items:center; gap:12px;
+}
+.name-btn:active { border-color:var(--accent); }
+.name-btn .nb-ava { width:38px; height:38px; border-radius:50%;
+  background:var(--accent); color:#fff; display:flex; align-items:center;
+  justify-content:center; font-size:16px; font-weight:700; flex:0 0 auto; }
 
 .day-row {
   background:var(--panel2); border:1px solid var(--border); border-radius:10px;
@@ -98,23 +105,18 @@ button.full { width:100%; }
   gap:10px; cursor:pointer;
 }
 .day-row:active { border-color:var(--accent); }
-.day-row .dr-num { font-size:18px; font-weight:700; color:var(--accent2);
-                    min-width:32px; text-align:center; }
-.day-row .dr-info { flex:1; }
-.day-row .dr-info .dr-line1 { font-size:14px; font-weight:600; }
+.day-row .dr-num { font-size:15px; font-weight:700; color:var(--accent2);
+                    min-width:54px; text-align:center; }
+.day-row .dr-info { flex:1; min-width:0; }
+.day-row .dr-info .dr-line1 { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .day-row .dr-info .dr-line2 { font-size:12px; color:var(--text2); margin-top:2px; }
-.day-row .dr-hours { font-size:16px; font-weight:700; color:var(--green); }
-.day-row.empty .dr-hours { color:var(--text2); }
-.day-row.empty .dr-info .dr-line1 { color:var(--text2); font-weight:400; font-style:italic; }
+.day-row .dr-hours { font-size:16px; font-weight:700; color:var(--green); white-space:nowrap; }
 
 .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
 
-.totals {
-  background:var(--panel2); border-radius:8px; padding:10px 12px;
-  font-size:13px; color:var(--text2);
-}
+.totals { background:var(--panel2); border-radius:8px; padding:10px 12px;
+  font-size:13px; color:var(--text2); }
 .totals b { color:var(--text); font-size:15px; }
 
 .toast {
@@ -122,7 +124,7 @@ button.full { width:100%; }
   background:var(--panel); border:1px solid var(--accent); border-radius:24px;
   padding:10px 18px; font-size:14px; z-index:2000;
   box-shadow:0 4px 16px rgba(0,0,0,0.4);
-  opacity:0; transition:opacity .2s; pointer-events:none;
+  opacity:0; transition:opacity .2s; pointer-events:none; max-width:90%; text-align:center;
 }
 .toast.show { opacity:1; }
 
@@ -130,7 +132,6 @@ button.full { width:100%; }
 .help { font-size:12px; color:var(--text2); margin-top:6px; }
 
 .section-header { display:flex; align-items:center; gap:8px; margin:18px 0 8px; }
-.section-header .sh-icon { font-size:18px; }
 .section-header .sh-title { font-size:12px; color:var(--text2);
                              text-transform:uppercase; letter-spacing:1px; font-weight:600; }
 .section-header .sh-line { flex:1; height:1px; background:var(--border); }
@@ -141,7 +142,15 @@ button.full { width:100%; }
        color:var(--text2); cursor:pointer; border-radius:7px; font-weight:600; }
 .tab.active { background:var(--accent); color:white; }
 
-/* ── Banner aktuálního měsíce / dekády (výrazné) ─────────── */
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.chip { background:var(--panel2); border:1px solid var(--border); color:var(--text2);
+        border-radius:16px; padding:6px 12px; font-size:13px; cursor:pointer; font-weight:600; }
+.chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.toggle-yn { display:flex; gap:8px; }
+.toggle-yn button { flex:1; }
+.toggle-yn button.off { background:var(--panel2); color:var(--text2); border:1px solid var(--border); }
+
 .month-banner {
   background:linear-gradient(135deg, var(--accent) 0%, #c93753 100%);
   border-radius:var(--radius); padding:18px 20px; margin-bottom:14px;
@@ -149,65 +158,97 @@ button.full { width:100%; }
 }
 .month-banner .mb-label { font-size:11px; color:rgba(255,255,255,0.75);
                            text-transform:uppercase; letter-spacing:2px; margin-bottom:4px; }
-.month-banner .mb-value { font-size:34px; font-weight:800; color:white;
-                           letter-spacing:1px; line-height:1.1; }
-.month-banner .mb-year  { font-size:24px; opacity:0.85; font-weight:600; }
-.month-banner .mb-sub   { font-size:14px; color:rgba(255,255,255,0.85);
-                           margin-top:6px; font-weight:600; }
+.month-banner .mb-value { font-size:30px; font-weight:800; color:white; line-height:1.1; }
+.month-banner .mb-year  { font-size:22px; opacity:0.85; font-weight:600; }
+.month-banner .mb-sub   { font-size:14px; color:rgba(255,255,255,0.85); margin-top:6px; font-weight:600; }
 
-/* Menší banner v hlavičce dekády (uvnitř karty) */
 .dekada-title {
   background:linear-gradient(135deg, var(--accent) 0%, #c93753 100%);
   color:white; padding:10px 14px; border-radius:8px;
   font-size:18px; font-weight:700; text-align:center; margin-bottom:12px;
-  letter-spacing:0.5px;
 }
-.dekada-title .dt-small { font-size:13px; font-weight:500; opacity:0.85; }
+
+.moto-hint { font-size:13px; color:var(--text2); margin-top:6px; }
+.moto-hint b { color:var(--green); font-size:15px; }
+.moto-hint.warn b { color:var(--accent2); }
+
+.big-cta { width:100%; padding:20px; font-size:19px; font-weight:800;
+  background:linear-gradient(135deg,var(--green) 0%,#2f9e63 100%);
+  border-radius:var(--radius); margin-bottom:14px; }
+
+table.report { width:100%; border-collapse:collapse; font-size:13px; }
+table.report th, table.report td { border:1px solid var(--border); padding:6px 8px; text-align:left; }
+table.report th { background:var(--panel2); color:var(--text2); font-size:11px;
+  text-transform:uppercase; letter-spacing:0.5px; }
+table.report td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.report-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+
+.stavba-sum { display:flex; justify-content:space-between; padding:8px 10px;
+  border-bottom:1px solid var(--border); font-size:14px; }
+.stavba-sum b { color:var(--green); }
+
+.menu-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.menu-item { background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+  padding:16px; text-align:center; cursor:pointer; font-weight:600; }
+.menu-item:active { border-color:var(--accent); }
+.menu-item .mi-ico { font-size:24px; display:block; margin-bottom:6px; }
+
+.list-edit { display:flex; align-items:center; gap:8px; background:var(--panel2);
+  border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+.list-edit .le-main { flex:1; min-width:0; }
+.list-edit .le-title { font-weight:600; }
+.list-edit .le-sub { font-size:12px; color:var(--text2); }
+.list-edit button { padding:6px 10px; font-size:13px; }
+
+.inactive { opacity:0.45; }
+
+@media print {
+  body { background:#fff; color:#000; }
+  header, .no-print, .month-banner, .chips, .tabs, button { display:none !important; }
+  main { max-width:none; padding:0; }
+  .card { border:none; background:#fff; padding:0; }
+  table.report th, table.report td { border:1px solid #000; }
+  table.report th { background:#eee; color:#000; }
+  .stavba-sum { color:#000; }
+  .stavba-sum b { color:#000; }
+}
 </style>
 </head>
 <body>
 
 <header>
   <button class="btn-back" id="btn-back" style="display:none;" onclick="goBack()">←</button>
-  <h1 id="page-title">Výkaz <span class="accent">stroje</span></h1>
-  <button id="btn-logout" onclick="logout()" title="Odhlásit">⏻</button>
+  <h1 id="page-title">Desetidenka</h1>
+  <button id="btn-logout" onclick="logout()" title="Odhlásit" style="display:none;">⏻</button>
 </header>
 
-<main id="main"></main>
-
+<main id="main"><div class="empty-msg">Načítám…</div></main>
 <div class="toast" id="toast"></div>
 
 <script>
-// ════════════════════════════════════════════════════════════════════
-//  LOKÁLNÍ ÚLOŽIŠTĚ (v0.1 - bez Firebase)
-// ════════════════════════════════════════════════════════════════════
-const STORAGE_KEY = 'vykaz_stroju_v1';
+/* ════════════════════════════════════════════════════════════════════
+   1) FIREBASE KONFIGURACE  (projekt vykazy-stroju)
+   ════════════════════════════════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey:            "AIzaSyCWwTH8HOezVQf7QRNmVq3pL0fRgIyqbAM",
+  authDomain:        "vykazy-stroju.firebaseapp.com",
+  projectId:         "vykazy-stroju",
+  storageBucket:     "vykazy-stroju.firebasestorage.app",
+  messagingSenderId: "1092189517109",
+  appId:             "1:1092189517109:web:23da2d8f54362c9cfc487c"
+};
+const FIREBASE_CONFIGURED = !JSON.stringify(firebaseConfig).includes("PASTE_");
 
-function loadAll(){
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-  catch(e){ return {}; }
-}
-function saveAll(data){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function getDB(){
-  const d = loadAll();
-  if(!d.stroje) d.stroje = [];
-  if(!d.vykazy) d.vykazy = {};
-  if(!d.stavby) d.stavby = [];
-  return d;
-}
-function setDB(d){ saveAll(d); }
-
-function uid(prefix){ return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); }
-
+/* ── Pomocné funkce ─────────────────────────────────────── */
 function pad2(n){ return String(n).padStart(2,'0'); }
-function currentDecade(date){
-  const d = date ? new Date(date) : new Date();
-  const day = d.getDate();
-  const dek = day <= 10 ? 1 : (day <= 20 ? 2 : 3);
-  return { rok:d.getFullYear(), mesic:d.getMonth()+1, dekada:dek };
-}
-function decadeKey(strojId, rok, mesic, dekada){
-  return strojId + '_' + rok + '-' + pad2(mesic) + '_' + dekada;
+function iso(y,m,d){ return y+'-'+pad2(m)+'-'+pad2(d); }
+function todayISO(){ const d=new Date(); return iso(d.getFullYear(), d.getMonth()+1, d.getDate()); }
+function isoParts(s){ const [y,m,d]=s.split('-').map(Number); return {y,m,d}; }
+function isoToCz(s){ const p=isoParts(s); return p.d+'.'+p.m+'.'+p.y; }
+function currentDecade(dateISO){
+  const p = dateISO ? isoParts(dateISO) : (function(){const d=new Date();return{y:d.getFullYear(),m:d.getMonth()+1,d:d.getDate()};})();
+  const dek = p.d <= 10 ? 1 : (p.d <= 20 ? 2 : 3);
+  return { rok:p.y, mesic:p.m, dekada:dek };
 }
 function decadeRange(year, month, dek){
   if(dek === 1) return { from:1, to:10 };
@@ -218,7 +259,6 @@ function decadeRange(year, month, dek){
 function mesicNazev(m){
   return ['leden','únor','březen','duben','květen','červen','červenec','srpen','září','říjen','listopad','prosinec'][m-1];
 }
-
 function hoursDiff(od, doStr){
   if(!od || !doStr) return 0;
   const [h1,m1] = od.split(':').map(Number);
@@ -228,568 +268,895 @@ function hoursDiff(od, doStr){
   if(mins < 0) mins += 24*60;
   return Math.round(mins / 6) / 10;
 }
-
+function round1(n){ return Math.round((Number(n)||0)*10)/10; }
+function uid(prefix){ return prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); }
+function slug(s){ return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'x'; }
+function escapeHtml(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+async function sha256(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 function toast(msg, ms){
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
+  t.textContent = msg; t.classList.add('show');
   clearTimeout(t._tm);
   t._tm = setTimeout(()=> t.classList.remove('show'), ms||1800);
 }
 
-function escapeHtml(s){
-  return String(s||'')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+/* ── Stav aplikace (cache z Firestore) ─────────────────── */
+const state = {
+  uid: null, me: null,
+  strojnici: [], stroje: [], stavby: [], zaznamy: [],
+  loaded: { strojnici:false, stroje:false, stavby:false, zaznamy:false },
+  started: false
+};
+let db = null, auth = null;
+
+/* identifikace stroje pro řetězec počítadla (per STROJ, ne per strojník) */
+function zStrojKey(z){ return z.strojId ? ('id:'+z.strojId) : ('man:'+slug(z.strojNazev)); }
+// Klíč zahrnuje i strojníka → každý strojník má max. 1 záznam na stroj/den.
+// Jiný strojník udělá vlastní (samostatný) záznam, nelze přepsat cizí.
+function recordId(strojnikId, strojKey, datum){ return slug(strojnikId) + '__' + slug(strojKey) + '__' + datum; }
+
+// Našeptávač staveb – učí se ze zadaných hodnot + číselníku
+function stavbaSuggestions(){
+  const set = new Set();
+  state.stavby.filter(s=>s.aktivni!==false).forEach(s=> set.add(s.kod||s.nazev));
+  state.zaznamy.forEach(z=>{ if(z.stavbaText) set.add(z.stavbaText); });
+  return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b,'cs'));
+}
+// Našeptávač ručně psaných strojů
+function strojManualSuggestions(){
+  const set = new Set();
+  state.zaznamy.forEach(z=>{ if(z.strojRucni && z.strojNazev) set.add(z.strojNazev); });
+  return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b,'cs'));
+}
+// Jsem autor záznamu / admin?
+function canEditRecord(z){ return !z || z.ownerUid===state.uid || (state.me && state.me.role==='admin'); }
+
+/* poslední stav počítadla daného stroje PŘED daným dnem (napříč strojníky) */
+function prevMoto(strojKey, datum){
+  const recs = state.zaznamy
+    .filter(z => zStrojKey(z)===strojKey && z.datum < datum && z.stavCitadla!=null)
+    .sort((a,b)=> a.datum < b.datum ? 1 : -1);
+  return recs.length ? recs[0] : null;
 }
 
-// ── Router ───────────────────────────────────────────────
+/* ════════════════════════════════════════════════════════════════════
+   2) ROUTER
+   ════════════════════════════════════════════════════════════════════ */
 const routeStack = [];
-function navigate(view, params){ routeStack.push({ view, params }); render(); }
-function goBack(){ if(routeStack.length <= 1) return; routeStack.pop(); render(); }
-function setRoot(view, params){ routeStack.length = 0; routeStack.push({ view, params }); render(); }
+function navigate(view, params){ routeStack.push({ view, params:params||{} }); render(); }
+function goBack(){ if(routeStack.length <= 1){ render(); return; } routeStack.pop(); render(); }
+function setRoot(view, params){ routeStack.length = 0; routeStack.push({ view, params:params||{} }); render(); }
 
 function render(){
+  if(!routeStack.length){ document.getElementById('main').innerHTML='<div class="empty-msg">Načítám…</div>'; return; }
   const r = routeStack[routeStack.length-1];
   document.getElementById('btn-back').style.display = (routeStack.length > 1) ? 'inline-block' : 'none';
-  if(r.view === 'login')           renderLogin();
-  else if(r.view === 'home')       renderHome();
-  else if(r.view === 'stroj-edit') renderStrojEdit(r.params);
-  else if(r.view === 'dekada')     renderDekada(r.params);
-  else if(r.view === 'den')        renderDen(r.params);
+  const map = { setup:renderSetup, login:renderLogin, home:renderHome, den:renderDen,
+                prehled:renderPrehled, ciselniky:renderCiselniky };
+  (map[r.view] || renderHome)(r.params);
   window.scrollTo(0,0);
 }
+function rerender(){ if(routeStack.length) render(); }
 
-// ════════════════════════════════════════════════════════════════════
-//  LOGIN
-// ════════════════════════════════════════════════════════════════════
-function renderLogin(){
-  document.getElementById('page-title').innerHTML = 'Výkaz <span class="accent">stroje</span>';
+/* ════════════════════════════════════════════════════════════════════
+   3) SETUP (Firebase není nakonfigurován)
+   ════════════════════════════════════════════════════════════════════ */
+function renderSetup(){
+  document.getElementById('page-title').innerHTML = 'Nastavení';
   document.getElementById('btn-logout').style.display = 'none';
   document.getElementById('main').innerHTML = `
     <div class="card">
-      <h2>Přihlášení strojníka</h2>
-      <div class="row" style="display:block;">
-        <label>Jméno a příjmení</label>
-        <input id="i-name" placeholder="např. Jan Novák" autocomplete="name">
-      </div>
-      <div class="row" style="display:block;">
-        <label>Telefon (nepovinné)</label>
-        <input id="i-tel" placeholder="+420 …" inputmode="tel" autocomplete="tel">
-      </div>
-      <button class="full green" onclick="doLogin()">Přihlásit a začít</button>
-      <p class="help">v0.1 ukládá data jen do tohoto telefonu (localStorage). Cloud (Firebase) se přidá v další verzi.</p>
-    </div>
-  `;
-}
-function doLogin(){
-  const name = (document.getElementById('i-name').value || '').trim();
-  const tel  = (document.getElementById('i-tel').value || '').trim();
-  if(name.length < 2){ toast('Zadej jméno'); return; }
-  const d = getDB();
-  d.profile = { name, telefon:tel };
-  setDB(d);
-  setRoot('home');
-}
-function logout(){
-  if(!confirm('Odhlásit? Data zůstanou v telefonu uložená.')) return;
-  const d = getDB();
-  delete d.profile;
-  setDB(d);
-  setRoot('login');
+      <h2>Aplikace ještě není propojená s cloudem</h2>
+      <p style="margin-bottom:10px;">Vlož do <code>index.html</code> nahoře údaje z Firebase projektu (objekt <code>firebaseConfig</code>). Postup je v <code>README.md</code>.</p>
+    </div>`;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  HOME
-// ════════════════════════════════════════════════════════════════════
-function renderHome(){
-  document.getElementById('page-title').innerHTML = 'Moje <span class="accent">stroje</span>';
-  document.getElementById('btn-logout').style.display = 'inline-block';
-  const d = getDB();
-  const cur = currentDecade();
-  let machinesHtml = '';
-  if(d.stroje.length === 0){
-    machinesHtml = '<div class="empty-msg">Zatím žádný stroj. Přidej první kliknutím dole.</div>';
+/* ════════════════════════════════════════════════════════════════════
+   4) LOGIN – výběr jména ze seznamu (+ volitelný PIN)
+   ════════════════════════════════════════════════════════════════════ */
+function renderLogin(){
+  document.getElementById('page-title').innerHTML = 'Přihlášení';
+  document.getElementById('btn-logout').style.display = 'none';
+  const lidi = state.strojnici.filter(s => s.aktivni !== false);
+
+  let inner;
+  if(!state.loaded.strojnici){
+    inner = '<div class="empty-msg">Načítám seznam…</div>';
+  } else if(lidi.length === 0){
+    inner = `
+      <div class="card">
+        <h2>Zatím tu není žádný strojník</h2>
+        <p style="margin-bottom:10px;">Přidej první jméno – to bude zároveň <b>správce</b> (vedoucí), který pak spravuje seznam strojníků, strojů a staveb.</p>
+        <label>Jméno a příjmení</label>
+        <input id="first-name" placeholder="např. Jan Novák" autocomplete="name">
+        <button class="full green" style="margin-top:10px;" onclick="createFirstPerson()">Vytvořit a přihlásit jako správce</button>
+      </div>`;
   } else {
-    machinesHtml = d.stroje.map(s => {
-      const key = decadeKey(s.id, cur.rok, cur.mesic, cur.dekada);
-      const v = d.vykazy[key];
-      const filled = v ? Object.keys(v.dny || {}).length : 0;
-      const range = decadeRange(cur.rok, cur.mesic, cur.dekada);
-      const total = range.to - range.from + 1;
-      const cls = filled === 0 ? 'status-empty' : (filled < total ? 'status-warn' : 'status-ok');
-      const lbl = filled + ' / ' + total + ' dní · ' + cur.dekada + '. dekáda ' + mesicNazev(cur.mesic);
+    inner = `
+      <div class="card">
+        <h2>Kdo jsi?</h2>
+        ${lidi.map(s => `
+          <button class="name-btn" onclick="pickName('${s.id}')">
+            <span class="nb-ava">${escapeHtml((s.jmeno||'?').trim().charAt(0).toUpperCase())}</span>
+            <span>${escapeHtml(s.jmeno)}${s.role==='admin'?' <span style="font-size:12px;color:var(--accent2);">★ vedoucí</span>':''}</span>
+          </button>`).join('')}
+      </div>
+      <p class="help">Své jméno tu nevidíš? Přidá ho vedoucí v sekci Číselníky → Strojníci.</p>`;
+  }
+  document.getElementById('main').innerHTML = inner;
+}
+
+async function createFirstPerson(){
+  const jmeno = (document.getElementById('first-name').value||'').trim();
+  if(jmeno.length < 2){ toast('Zadej jméno'); return; }
+  try{
+    const id = uid('strojnik');
+    await db.collection('strojnici').doc(id).set({
+      jmeno, role:'admin', aktivni:true, claimedUid: state.uid, pinHash:null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
+    toast('✓ Vytvořeno');
+  }catch(e){ alert('Nepodařilo se uložit: '+e.message); }
+}
+
+async function pickName(id){
+  const s = state.strojnici.find(x=>x.id===id);
+  if(!s) return;
+  if(s.claimedUid && s.claimedUid !== state.uid){
+    if(!confirm(s.jmeno+' je přihlášený/á na jiném zařízení. Převzít přihlášení sem?')) return;
+  }
+  if(s.pinHash){
+    const pin = prompt('PIN pro '+s.jmeno+':');
+    if(pin==null) return;
+    if(await sha256(pin.trim()) !== s.pinHash){ toast('Špatný PIN'); return; }
+  }
+  try{
+    await db.collection('strojnici').doc(id).update({ claimedUid: state.uid });
+    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
+    toast('✓ Přihlášen');
+  }catch(e){ alert('Chyba přihlášení: '+e.message); }
+}
+
+async function logout(){
+  if(!state.me) return;
+  if(!confirm('Odhlásit '+state.me.jmeno+' z tohoto telefonu?')) return;
+  try{
+    await db.collection('strojnici').doc(state.me.id).update({ claimedUid: null });
+    await db.collection('uids').doc(state.uid).delete().catch(()=>{});
+  }
+  catch(e){ alert(e.message); }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   5) HOME – strojník
+   ════════════════════════════════════════════════════════════════════ */
+function myZaznamy(){
+  if(!state.me) return [];
+  return state.zaznamy.filter(z => z.strojnikId === state.me.id)
+    .sort((a,b)=> a.datum < b.datum ? 1 : -1);
+}
+function renderHome(){
+  if(!state.me){ setRoot('login'); return; }
+  document.getElementById('page-title').innerHTML = 'Moje <span class="accent">výkazy</span>';
+  document.getElementById('btn-logout').style.display = 'inline-block';
+
+  const cur = currentDecade();
+  const range = decadeRange(cur.rok, cur.mesic, cur.dekada);
+  const from = iso(cur.rok,cur.mesic,range.from), to = iso(cur.rok,cur.mesic,range.to);
+  const mine = myZaznamy();
+  const inDek = mine.filter(z => z.datum>=from && z.datum<=to);
+  const sumMth = round1(inDek.reduce((s,z)=> s+(Number(z.mth)||0),0));
+
+  let listHtml;
+  if(mine.length===0){
+    listHtml = '<div class="empty-msg">Zatím žádný den. Klikni nahoře na „Zapsat dnešek".</div>';
+  } else {
+    listHtml = mine.slice(0,40).map(z => {
+      const tank = z.tankoval ? ' · ⛽' : '';
       return `
-        <div class="machine-card" onclick="openStroj('${s.id}')">
-          <div class="mc-title">🚜 ${escapeHtml(s.nazev)}</div>
-          <div class="mc-meta">${escapeHtml(s.typ || '–')} · Inv.: ${escapeHtml(s.inv || '–')}</div>
-          <div class="mc-status ${cls}">${lbl}</div>
+      <div class="day-row" onclick="navigate('den',{id:'${z.id}'})">
+        <div class="dr-num">${isoToCz(z.datum).replace(/\.\d{4}$/,'.')}</div>
+        <div class="dr-info">
+          <div class="dr-line1">${escapeHtml(z.strojNazev||'(stroj?)')}</div>
+          <div class="dr-line2">${escapeHtml(z.stavbaText||'(stavba?)')}${tank}</div>
         </div>
-      `;
+        <div class="dr-hours">${z.mth!=null?round1(z.mth).toFixed(1)+' mth':'–'}</div>
+      </div>`;
     }).join('');
   }
-  document.getElementById('main').innerHTML = `
-    <div class="month-banner">
-      <div class="mb-label">Aktuální dekáda</div>
-      <div class="mb-value">${mesicNazev(cur.mesic).toUpperCase()} <span class="mb-year">${cur.rok}</span></div>
-      <div class="mb-sub">${cur.dekada}. dekáda</div>
-    </div>
-    <div class="card">
-      <h2>Strojník</h2>
-      <div style="font-size:16px;font-weight:600;">${escapeHtml(d.profile ? d.profile.name : 'neznámý')}</div>
-      ${d.profile && d.profile.telefon ? `<div style="font-size:13px;color:var(--text2);margin-top:2px;">${escapeHtml(d.profile.telefon)}</div>` : ''}
-    </div>
-    ${machinesHtml}
-    <button class="full secondary" onclick="navigate('stroj-edit',{})" style="margin-top:8px;">+ Přidat stroj</button>
-  `;
-}
-function openStroj(id){
-  const cur = currentDecade();
-  navigate('dekada', { strojId:id, rok:cur.rok, mesic:cur.mesic, dekada:cur.dekada });
-}
 
-// ════════════════════════════════════════════════════════════════════
-//  STROJ - editace
-// ════════════════════════════════════════════════════════════════════
-function renderStrojEdit(params){
-  const d = getDB();
-  const stroj = params.id ? d.stroje.find(s => s.id === params.id) : null;
-  document.getElementById('page-title').textContent = stroj ? 'Upravit stroj' : 'Nový stroj';
-  document.getElementById('btn-logout').style.display = 'none';
-  const typy = ['válec','finišer','nákladní auto','kropice','čelní nakladač','bagr','grejdr','fréza','jiný'];
-  const jed  = ['m²','m³','t','km','ks','mh'];
-  document.getElementById('main').innerHTML = `
-    <div class="card">
-      <div class="row" style="display:block;">
-        <label>Název stroje</label>
-        <input id="s-nazev" placeholder="např. CAT CB-2.7, autodomíchávač DAF" value="${stroj ? escapeHtml(stroj.nazev) : ''}">
-      </div>
-      <div class="grid-2">
-        <div>
-          <label>Typ</label>
-          <select id="s-typ">
-            <option value="">–</option>
-            ${typy.map(t => `<option ${stroj && stroj.typ===t?'selected':''}>${t}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label>Inv. číslo</label>
-          <input id="s-inv" placeholder="např. 123" value="${stroj ? escapeHtml(stroj.inv || '') : ''}">
-        </div>
-      </div>
-      <div class="row" style="display:block;margin-top:10px;">
-        <label>Jednotka výkonu</label>
-        <select id="s-jed">
-          <option value="">– volitelné –</option>
-          ${jed.map(t => `<option ${stroj && stroj.jednotka===t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="green" style="flex:1;" onclick="saveStroj('${stroj?stroj.id:''}')">Uložit</button>
-        ${stroj ? `<button class="danger" onclick="deleteStroj('${stroj.id}')">Smazat</button>` : ''}
-      </div>
-    </div>
-  `;
-}
-function saveStroj(id){
-  const nazev = (document.getElementById('s-nazev').value || '').trim();
-  if(nazev.length < 2){ toast('Zadej název'); return; }
-  const typ  = document.getElementById('s-typ').value;
-  const inv  = (document.getElementById('s-inv').value || '').trim();
-  const jed  = document.getElementById('s-jed').value;
-  const d = getDB();
-  if(id){
-    const s = d.stroje.find(x => x.id === id);
-    if(s){ s.nazev = nazev; s.typ = typ; s.inv = inv; s.jednotka = jed; }
-  } else {
-    d.stroje.push({ id: uid('s'), nazev, typ, inv, jednotka:jed });
-  }
-  setDB(d);
-  toast('✓ Uloženo');
-  goBack();
-}
-function deleteStroj(id){
-  if(!confirm('Smazat stroj? Výkazy zůstanou v archivu.')) return;
-  const d = getDB();
-  d.stroje = d.stroje.filter(s => s.id !== id);
-  setDB(d);
-  toast('🗑 Smazáno');
-  goBack();
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  DEKÁDA
-// ════════════════════════════════════════════════════════════════════
-function getVykaz(strojId, rok, mesic, dekada){
-  const d = getDB();
-  const key = decadeKey(strojId, rok, mesic, dekada);
-  if(!d.vykazy[key]){
-    d.vykazy[key] = { header: { rok, mesic, dekada, motoStart:'', motoEnd:'' }, dny: {} };
-    setDB(d);
-  }
-  return { key, v: d.vykazy[key] };
-}
-
-function renderDekada(params){
-  const { strojId, rok, mesic, dekada } = params;
-  const d = getDB();
-  const stroj = d.stroje.find(s => s.id === strojId);
-  if(!stroj){ setRoot('home'); return; }
-  const { key, v } = getVykaz(strojId, rok, mesic, dekada);
-  const range = decadeRange(rok, mesic, dekada);
-
-  document.getElementById('page-title').innerHTML = `🚜 ${escapeHtml(stroj.nazev)}`;
-  document.getElementById('btn-logout').style.display = 'none';
-
-  let daysHtml = '';
-  let sumPos = 0, sumStr = 0, sumKm = 0;
-  for(let day = range.from; day <= range.to; day++){
-    const r = v.dny[day];
-    if(r){
-      const hPos = hoursDiff(r.posOd, r.posDo);
-      const hStr = hoursDiff(r.strOd, r.strDo);
-      sumPos += hPos; sumStr += hStr; sumKm += Number(r.km)||0;
-      daysHtml += `
-        <div class="day-row" onclick="navigate('den',{strojId:'${strojId}',rok:${rok},mesic:${mesic},dekada:${dekada},den:${day}})">
-          <div class="dr-num">${day}.</div>
-          <div class="dr-info">
-            <div class="dr-line1">${escapeHtml(r.stavba || '(stavba nezadána)')}</div>
-            <div class="dr-line2">${escapeHtml((r.popis||'').slice(0,40))}${r.popis && r.popis.length>40?'…':''}</div>
-          </div>
-          <div class="dr-hours">${hStr.toFixed(1)} h</div>
-        </div>
-      `;
-    } else {
-      daysHtml += `
-        <div class="day-row empty" onclick="navigate('den',{strojId:'${strojId}',rok:${rok},mesic:${mesic},dekada:${dekada},den:${day}})">
-          <div class="dr-num">${day}.</div>
-          <div class="dr-info"><div class="dr-line1">nezadáno</div></div>
-          <div class="dr-hours">–</div>
-        </div>
-      `;
-    }
-  }
-
-  let prevD = dekada-1, prevM = mesic, prevR = rok;
-  if(prevD < 1){ prevD = 3; prevM--; if(prevM < 1){ prevM = 12; prevR--; } }
-  let nextD = dekada+1, nextM = mesic, nextR = rok;
-  if(nextD > 3){ nextD = 1; nextM++; if(nextM > 12){ nextM = 1; nextR++; } }
+  const adminBtn = (state.me.role==='admin')
+    ? `<div class="menu-item" onclick="navigate('ciselniky',{})"><span class="mi-ico">⚙️</span>Číselníky</div>` : '';
 
   document.getElementById('main').innerHTML = `
     <div class="month-banner">
-      <div class="mb-label">Vyplňuje se</div>
-      <div class="mb-value">${mesicNazev(mesic).toUpperCase()} <span class="mb-year">${rok}</span></div>
-      <div class="mb-sub">${dekada}. dekáda · ${escapeHtml(d.profile ? d.profile.name : '')}</div>
-    </div>
-    <div class="card">
-      <h2>Motohodiny počítadla</h2>
-      <div class="grid-2">
-        <div>
-          <label>Zač. dekády</label>
-          <input id="moto-start" type="number" step="0.1" value="${v.header.motoStart || ''}" placeholder="–" onchange="setMoto('${key}','start',this.value)">
-        </div>
-        <div>
-          <label>Konec dekády</label>
-          <input id="moto-end" type="number" step="0.1" value="${v.header.motoEnd || ''}" placeholder="–" onchange="setMoto('${key}','end',this.value)">
-        </div>
-      </div>
+      <div class="mb-label">Dnes</div>
+      <div class="mb-value">${isoToCz(todayISO())}</div>
+      <div class="mb-sub">${cur.dekada}. dekáda · ${escapeHtml(state.me.jmeno)}</div>
     </div>
 
-    <div class="tabs">
-      <div class="tab" onclick="navigate('dekada',{strojId:'${strojId}',rok:${prevR},mesic:${prevM},dekada:${prevD}})">‹ předchozí</div>
-      <div class="tab active">${dekada}. dekáda</div>
-      <div class="tab" onclick="navigate('dekada',{strojId:'${strojId}',rok:${nextR},mesic:${nextM},dekada:${nextD}})">další ›</div>
+    <button class="big-cta" onclick="navigate('den',{datum:'${todayISO()}'})">➕ Zapsat dnešek</button>
+
+    <div class="totals" style="margin-bottom:14px;">
+      Tato dekáda: <b>${inDek.length}</b> dní · motohodiny <b>${sumMth.toFixed(1)} mth</b>
     </div>
 
-    <div class="section-header">
-      <span class="sh-icon">📅</span>
-      <span class="sh-title">Dny v dekádě</span>
-      <span class="sh-line"></span>
-    </div>
-    ${daysHtml}
-
-    <div class="totals" style="margin-top:14px;">
-      Σ za dekádu: posádka <b>${sumPos.toFixed(1)} h</b> · stroj <b>${sumStr.toFixed(1)} h</b> · ujeto <b>${sumKm.toFixed(1)} km</b>
+    <div class="menu-grid" style="margin-bottom:6px;">
+      <div class="menu-item" onclick="navigate('prehled',{})"><span class="mi-ico">📊</span>Přehled / desetidenka</div>
+      ${adminBtn || `<div class="menu-item" onclick="navigate('den',{datum:'${todayISO()}'})"><span class="mi-ico">📝</span>Nový den</div>`}
     </div>
 
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button class="green" style="flex:1;" onclick="exportXlsx('${key}')">📥 Export do Excelu</button>
-    </div>
-    <p class="help">Excel se vyplní ve formátu „Výkaz stavebního stroje" - stejný tiskopis, na který je vedoucí mechanizace zvyklý.</p>
+    <div class="section-header"><span class="sh-title">Moje poslední dny</span><span class="sh-line"></span></div>
+    ${listHtml}
   `;
 }
 
-function setMoto(key, which, val){
-  const d = getDB();
-  const v = d.vykazy[key];
-  if(!v) return;
-  if(which === 'start') v.header.motoStart = val;
-  else v.header.motoEnd = val;
-  setDB(d);
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  DEN
-// ════════════════════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════════════════════
+   6) DEN – rychlý zápis (cíl < 15 s)
+   ════════════════════════════════════════════════════════════════════ */
 function renderDen(params){
-  const { strojId, rok, mesic, dekada, den } = params;
-  const d = getDB();
-  const stroj = d.stroje.find(s => s.id === strojId);
-  const { key, v } = getVykaz(strojId, rok, mesic, dekada);
-  const r = v.dny[den] || {};
-  document.getElementById('page-title').innerHTML = `🚜 ${escapeHtml(stroj.nazev)}`;
+  if(!state.me){ setRoot('login'); return; }
+  const existing = params.id ? (state.zaznamy.find(z=>z.id===params.id) || null) : null;
+  const datum = existing ? existing.datum : (params.datum || todayISO());
+  const r = existing || {};
+  const manual = existing ? !!existing.strojRucni : false;
+  const readOnly = existing ? !canEditRecord(existing) : false;
+
+  document.getElementById('page-title').innerHTML = existing ? (readOnly?'Záznam':'Upravit den') : 'Nový den';
   document.getElementById('btn-logout').style.display = 'none';
 
-  const stavbyOptions = (d.stavby || []).map(s => `<option value="${escapeHtml(s)}">`).join('');
+  // Read-only pohled (cizí záznam) – nelze měnit data, ALE lze přidat připomínku.
+  if(readOnly){
+    document.getElementById('main').innerHTML = `
+      <div class="dekada-title">${isoToCz(datum)}</div>
+      <div class="card">
+        <div class="le-sub" style="margin-bottom:10px;">✍ Zapsal: <b style="color:var(--text);">${escapeHtml(r.strojnikJmeno||'?')}</b></div>
+        <div class="stavba-sum"><span>Stroj</span><b>${escapeHtml(r.strojNazev||'')}</b></div>
+        <div class="stavba-sum"><span>Stavba</span><b>${escapeHtml(r.stavbaText||'')}</b></div>
+        <div class="stavba-sum"><span>Počítadlo</span><b>${r.stavCitadla!=null?r.stavCitadla:'–'}</b></div>
+        <div class="stavba-sum"><span>Motohodiny</span><b>${r.mth!=null?round1(r.mth).toFixed(1)+' mth':'–'}</b></div>
+        ${(r.hodOd||r.hodDo)?`<div class="stavba-sum"><span>Hodiny</span><b>${r.hodOd||''}–${r.hodDo||''}</b></div>`:''}
+        <div class="stavba-sum"><span>Tankování</span><b>${r.tankoval?'⛽ ano':'ne'}</b></div>
+        ${r.poznamka?`<div class="stavba-sum"><span>Poznámka</span><b>${escapeHtml(r.poznamka)}</b></div>`:''}
+      </div>
+      <p class="help">Data tohoto záznamu může změnit jen jeho autor (${escapeHtml(r.strojnikJmeno||'?')}) nebo administrátor. Připomínku ale můžeš přidat i ty.</p>
+      ${poznamkyCardHtml(existing)}`;
+    if(existing) loadPoznamky(existing.id);
+    return;
+  }
+
+  const strojeAkt = state.stroje.filter(s=>s.aktivni!==false);
+  const strojOptions = strojeAkt.map(s =>
+    `<option value="${s.id}" ${existing && existing.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}${s.spz?' ('+escapeHtml(s.spz)+')':''}</option>`).join('');
+  const stavbyOptions = stavbaSuggestions().map(v => `<option value="${escapeHtml(v)}">`).join('');
+  const strojManualOptions = strojManualSuggestions().map(v => `<option value="${escapeHtml(v)}">`).join('');
+  const autor = existing ? existing.strojnikJmeno : state.me.jmeno;
 
   document.getElementById('main').innerHTML = `
-    <div class="dekada-title">
-      ${den}. ${mesicNazev(mesic)} ${rok}
-      <div class="dt-small">${dekada}. dekáda</div>
-    </div>
+    <div class="dekada-title">${isoToCz(datum)}</div>
+
+    <button class="full secondary" style="margin-bottom:12px;" onclick="copyYesterday()">📋 Jako včera (předvyplnit)</button>
+
     <div class="card">
-      <h2>Stavba a práce</h2>
+      <div class="le-sub" style="margin-bottom:10px;">✍ Zapisuje: <b style="color:var(--text);">${escapeHtml(autor)}</b>${existing&&existing.ownerUid!==state.uid?' (upravuje admin)':''}</div>
+      <div class="row" style="display:block;">
+        <label>Datum</label>
+        <input id="f-datum" type="date" value="${datum}" onchange="updateMth();checkConflict();">
+      </div>
+
+      <div class="row" style="display:block;">
+        <label>Stroj</label>
+        <select id="f-stroj" onchange="onStrojChange()">
+          <option value="">— vyber stroj —</option>
+          ${strojOptions}
+          <option value="__manual__" ${manual?'selected':''}>✏️ napsat ručně…</option>
+        </select>
+        <input id="f-strojManual" list="stroj-manual-list" placeholder="napiš název stroje" style="margin-top:8px; display:${manual?'block':'none'};" value="${manual?escapeHtml(existing.strojNazev||''):''}" oninput="updateMth();checkConflict();">
+        <datalist id="stroj-manual-list">${strojManualOptions}</datalist>
+      </div>
+
+      <div id="day-conflict" class="moto-hint warn" style="margin:0 0 6px;"></div>
+
       <div class="row" style="display:block;">
         <label>Stavba</label>
-        <input id="f-stavba" list="stavby-list" placeholder="kód / název stavby" value="${escapeHtml(r.stavba || '')}">
+        <input id="f-stavba" list="stavby-list" placeholder="začni psát… (např. Marti → Martinovice)" value="${escapeHtml(r.stavbaText||'')}">
         <datalist id="stavby-list">${stavbyOptions}</datalist>
       </div>
+
       <div class="row" style="display:block;">
-        <label>Popis provedené práce</label>
-        <textarea id="f-popis" placeholder="např. hutnění podkladu, pokládka ACO 11">${escapeHtml(r.popis || '')}</textarea>
+        <label>Stav počítadla motohodin</label>
+        <input id="f-stav" type="number" step="0.1" inputmode="decimal" placeholder="např. 7591" value="${r.stavCitadla!=null?r.stavCitadla:''}" oninput="updateMth()">
+        <div class="moto-hint" id="moto-hint"></div>
       </div>
-      <div class="grid-2">
-        <div>
-          <label>Množství${stroj.jednotka ? ' ('+stroj.jednotka+')' : ''}</label>
-          <input id="f-mnozstvi" type="number" step="0.01" inputmode="decimal" value="${r.mnozstvi || ''}">
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h2 style="margin:0;">Tankování</h2>
+        <div class="toggle-yn" style="width:160px;">
+          <button id="tank-no"  class="${r.tankoval?'off':''}" onclick="setTank(false)">Ne</button>
+          <button id="tank-yes" class="${r.tankoval?'':'off'}" onclick="setTank(true)">⛽ Ano</button>
         </div>
-        <div>
-          <label>Ujeto km</label>
-          <input id="f-km" type="number" step="0.1" inputmode="decimal" value="${r.km || ''}">
+      </div>
+      <details ${ (r.hodOd||r.hodDo) ? 'open':''}>
+        <summary style="cursor:pointer;color:var(--text2);font-size:13px;">+ Odpracované hodiny (od–do) – nepovinné</summary>
+        <div class="grid-3" style="margin-top:10px;">
+          <div><label>od</label><input id="f-od" type="time" value="${r.hodOd||''}" onchange="updateHod()"></div>
+          <div><label>do</label><input id="f-do" type="time" value="${r.hodDo||''}" onchange="updateHod()"></div>
+          <div><label>celkem</label><input id="f-hod" readonly value="${hoursDiff(r.hodOd,r.hodDo).toFixed(1)}" style="opacity:.7;"></div>
         </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Pracovní doba</h2>
-      <label>Posádka</label>
-      <div class="grid-3" style="margin-bottom:10px;">
-        <div><label>od</label><input id="f-posOd" type="time" value="${r.posOd || ''}"></div>
-        <div><label>do</label><input id="f-posDo" type="time" value="${r.posDo || ''}"></div>
-        <div><label>celkem</label><input id="f-posCelk" readonly value="${hoursDiff(r.posOd,r.posDo).toFixed(1)}" style="opacity:0.7;"></div>
-      </div>
-
-      <div style="display:flex;align-items:center;gap:8px;margin:4px 0 10px;">
-        <label style="margin:0;flex:1;">Stroj</label>
-        <button type="button" class="secondary" style="padding:6px 10px;font-size:12px;font-weight:600;" onclick="copyPosadkaToStroj()">= stejné jako posádka ↓</button>
-      </div>
-      <div class="grid-3">
-        <div><label>od</label><input id="f-strOd" type="time" value="${r.strOd || ''}"></div>
-        <div><label>do</label><input id="f-strDo" type="time" value="${r.strDo || ''}"></div>
-        <div><label>celkem</label><input id="f-strCelk" readonly value="${hoursDiff(r.strOd,r.strDo).toFixed(1)}" style="opacity:0.7;"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Rozpad hodin stroje</h2>
-      <p class="help" style="margin-bottom:10px;">Vyplň jen kategorie, které platí. Součet musí být ≤ hodin stroje.</p>
-      <div class="grid-3">
-        <div><label>nezaj. práce</label><input id="f-hNezaj" type="number" step="0.1" inputmode="decimal" value="${r.hNezaj || ''}"></div>
-        <div><label>opravy stavba</label><input id="f-hOpStav" type="number" step="0.1" inputmode="decimal" value="${r.hOpStav || ''}"></div>
-        <div><label>opravy dílna</label><input id="f-hOpDil" type="number" step="0.1" inputmode="decimal" value="${r.hOpDil || ''}"></div>
-        <div><label>údržba</label><input id="f-hUdr" type="number" step="0.1" inputmode="decimal" value="${r.hUdr || ''}"></div>
-        <div><label>přesuny</label><input id="f-hPres" type="number" step="0.1" inputmode="decimal" value="${r.hPres || ''}"></div>
-        <div><label>jiné</label><input id="f-hJine" type="number" step="0.1" inputmode="decimal" value="${r.hJine || ''}"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Odběr PHM (litry)</h2>
-      <div class="grid-4">
-        <div><label>benzin</label><input id="f-phmB" type="number" step="0.1" inputmode="decimal" value="${r.phmBenzin || ''}"></div>
-        <div><label>nafta</label><input id="f-phmN" type="number" step="0.1" inputmode="decimal" value="${r.phmNafta || ''}"></div>
-        <div><label>motor. olej</label><input id="f-phmMO" type="number" step="0.1" inputmode="decimal" value="${r.phmMotO || ''}"></div>
-        <div><label>ost. olej</label><input id="f-phmOO" type="number" step="0.1" inputmode="decimal" value="${r.phmOstO || ''}"></div>
+      </details>
+      <div class="row" style="display:block;margin-top:10px;">
+        <label>Poznámka k mému zápisu (nepovinné)</label>
+        <input id="f-pozn" placeholder="" value="${escapeHtml(r.poznamka||'')}">
       </div>
     </div>
 
     <div style="display:flex;gap:8px;">
-      <button class="green" style="flex:1;" onclick="saveDen('${key}',${den})">Uložit den</button>
-      ${v.dny[den] ? `<button class="danger" onclick="deleteDen('${key}',${den})">Smazat</button>` : ''}
+      <button class="green" style="flex:1;" onclick="saveDen()">Uložit den</button>
+      ${existing && canEditRecord(existing) ? `<button class="danger" onclick="deleteDen('${existing.id}')">Smazat</button>` : ''}
+    </div>
+    <input type="hidden" id="f-existingId" value="${existing?existing.id:''}">
+
+    ${poznamkyCardHtml(existing)}
+  `;
+  _tank = !!r.tankoval;
+  updateMth();
+  checkConflict();
+  if(existing) loadPoznamky(existing.id);
+}
+
+function checkConflict(){
+  const div = document.getElementById('day-conflict');
+  if(!div) return;
+  const datum = document.getElementById('f-datum').value;
+  const strojKey = currentStrojKey();
+  const existingId = document.getElementById('f-existingId').value;
+  if(!strojKey){ div.innerHTML=''; div.style.display='none'; return; }
+  const others = state.zaznamy.filter(z =>
+    z.datum===datum && zStrojKey(z)===strojKey && z.id!==existingId && z.strojnikId!==state.me.id);
+  if(others.length){
+    div.style.display='block';
+    div.innerHTML = '⚠ Tento stroj už pro '+isoToCz(datum)+' zapsal '+escapeHtml(others.map(o=>o.strojnikJmeno).filter(Boolean).join(', '))
+      +'. Tvůj zápis bude <b>samostatný</b> a jeho nepřepíše – do připomínky napiš důvod (např. „předchozí je chybně").';
+  } else { div.innerHTML=''; div.style.display='none'; }
+}
+
+let _tank = false;
+function setTank(v){
+  _tank = v;
+  document.getElementById('tank-yes').className = v?'':'off';
+  document.getElementById('tank-no').className  = v?'off':'';
+}
+function onStrojChange(){
+  const v = document.getElementById('f-stroj').value;
+  document.getElementById('f-strojManual').style.display = (v==='__manual__')?'block':'none';
+  updateMth();
+  checkConflict();
+}
+function updateHod(){
+  document.getElementById('f-hod').value = hoursDiff(
+    document.getElementById('f-od').value, document.getElementById('f-do').value).toFixed(1);
+}
+function currentStrojKey(){
+  const sel = document.getElementById('f-stroj').value;
+  if(sel==='__manual__'){ return 'man:'+slug(document.getElementById('f-strojManual').value); }
+  if(sel){ return 'id:'+sel; }
+  return null;
+}
+function updateMth(){
+  const hint = document.getElementById('moto-hint');
+  if(!hint) return;
+  const datum = document.getElementById('f-datum').value;
+  const strojKey = currentStrojKey();
+  const stav = parseFloat(document.getElementById('f-stav').value);
+  if(!strojKey || isNaN(stav)){ hint.className='moto-hint'; hint.innerHTML='Po zadání stroje a stavu počítadla se dopočítají motohodiny.'; return; }
+  const prev = prevMoto(strojKey, datum);
+  if(!prev){ hint.className='moto-hint'; hint.innerHTML='První zápis tohoto stroje – motohodiny za den = 0. Příště se počítají z rozdílu.'; return; }
+  const mth = round1(stav - prev.stavCitadla);
+  if(mth < 0){ hint.className='moto-hint warn'; hint.innerHTML=`⚠ Počítadlo (${stav}) je nižší než minule (${prev.stavCitadla} z ${isoToCz(prev.datum)}). Zkontroluj.`; }
+  else { hint.className='moto-hint'; hint.innerHTML=`Minule ${prev.stavCitadla} (${isoToCz(prev.datum)}) → dnes <b>${mth.toFixed(1)} mth</b>`; }
+}
+
+function copyYesterday(){
+  const mine = myZaznamy();
+  if(!mine.length){ toast('Není z čeho kopírovat'); return; }
+  const last = mine[0];
+  const sel = document.getElementById('f-stroj');
+  if(last.strojId && state.stroje.some(s=>s.id===last.strojId)){
+    sel.value = last.strojId; onStrojChange();
+  } else if(last.strojNazev){
+    sel.value = '__manual__'; onStrojChange();
+    document.getElementById('f-strojManual').value = last.strojNazev;
+  }
+  document.getElementById('f-stavba').value = last.stavbaText || '';
+  if(last.hodOd||last.hodDo){
+    const det = document.querySelector('details'); if(det) det.open = true;
+    document.getElementById('f-od').value = last.hodOd||'';
+    document.getElementById('f-do').value = last.hodDo||'';
+    updateHod();
+  }
+  setTank(!!last.tankoval);
+  document.getElementById('f-stav').focus();
+  updateMth();
+  toast('✓ Předvyplněno z '+isoToCz(last.datum)+' – uprav počítadlo');
+}
+
+async function saveDen(){
+  const datum = document.getElementById('f-datum').value;
+  if(!datum){ toast('Vyber datum'); return; }
+  const sel = document.getElementById('f-stroj').value;
+  let strojId=null, strojNazev='', strojRucni=false;
+  if(sel==='__manual__'){
+    strojNazev = (document.getElementById('f-strojManual').value||'').trim();
+    strojRucni = true;
+    if(!strojNazev){ toast('Napiš název stroje'); return; }
+  } else if(sel){
+    const s = state.stroje.find(x=>x.id===sel);
+    if(!s){ toast('Vyber stroj'); return; }
+    strojId = s.id; strojNazev = s.nazev;
+  } else { toast('Vyber stroj'); return; }
+
+  const stavbaText = (document.getElementById('f-stavba').value||'').trim();
+  const stavbaMatch = state.stavby.find(s => (s.kod||s.nazev)===stavbaText);
+  const stavStr = document.getElementById('f-stav').value;
+  const stavCitadla = stavStr==='' ? null : Number(stavStr);
+  const hodOd = document.getElementById('f-od') ? document.getElementById('f-od').value : '';
+  const hodDo = document.getElementById('f-do') ? document.getElementById('f-do').value : '';
+  const poznamka = (document.getElementById('f-pozn').value||'').trim();
+
+  if(stavCitadla==null && !stavbaText && !hodOd){ toast('Vyplň aspoň stavbu nebo počítadlo'); return; }
+
+  const strojKey = strojId ? ('id:'+strojId) : ('man:'+slug(strojNazev));
+  let mth = 0;
+  if(stavCitadla!=null){
+    const prev = prevMoto(strojKey, datum);
+    if(prev){
+      mth = round1(stavCitadla - prev.stavCitadla);
+      if(mth < 0 && !confirm('Počítadlo je nižší než minule – motohodiny vyjdou záporně. Uložit i tak?')) return;
+    }
+  }
+
+  // Editace existujícího → zachovej jeho ID a původního autora (i když ho mění admin).
+  const existingId = document.getElementById('f-existingId').value;
+  const existing = existingId ? state.zaznamy.find(z=>z.id===existingId) : null;
+  if(existing && !canEditRecord(existing)){ toast('Tento záznam nesmíš měnit'); return; }
+  const id = existing ? existing.id : recordId(state.me.id, strojKey, datum);
+  const already = existing || state.zaznamy.find(z=>z.id===id);
+  const ownerUid     = existing ? existing.ownerUid     : state.uid;
+  const authorId     = existing ? existing.strojnikId   : state.me.id;
+  const authorJmeno  = existing ? existing.strojnikJmeno : state.me.jmeno;
+
+  const docData = {
+    datum, strojId, strojNazev, strojRucni,
+    strojnikId: authorId, strojnikJmeno: authorJmeno,
+    ownerUid,
+    stavbaId: stavbaMatch ? stavbaMatch.id : null,
+    stavbaText,
+    stavCitadla, mth,
+    hodOd, hodDo, tankoval: !!_tank,
+    poznamka,
+    upravilJmeno: state.me.jmeno,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(!already) docData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+  try{
+    await db.collection('zaznamy').doc(id).set(docData, { merge:true });
+    if(strojId && stavCitadla!=null){
+      const s = state.stroje.find(x=>x.id===strojId);
+      if(s && (!s.lastMotoDate || datum >= s.lastMotoDate)){
+        db.collection('stroje').doc(strojId).set(
+          { lastMoto: stavCitadla, lastMotoDate: datum }, { merge:true }).catch(()=>{});
+      }
+    }
+    toast('✓ Uloženo');
+    goBack();
+  }catch(e){ alert('Uložení selhalo: '+e.message); }
+}
+
+async function deleteDen(id){
+  if(!confirm('Smazat tento den?')) return;
+  try{ await db.collection('zaznamy').doc(id).delete(); toast('🗑 Smazáno'); goBack(); }
+  catch(e){ alert(e.message); }
+}
+
+/* ── Připomínky k záznamu (vlákno) ─────────────────────────
+   Přidat smí kdokoli k jakémukoli záznamu; data záznamu se nemění.
+   Cizí připomínku nepřepíše/nesmaže nikdo kromě jejího autora nebo admina. */
+let _poznUnsub = null;
+function poznamkyCardHtml(existing){
+  if(!existing) return '<p class="help" style="margin-top:12px;">💬 Připomínky půjde přidat po uložení záznamu.</p>';
+  return `
+    <div class="card">
+      <h2>💬 Připomínky k záznamu</h2>
+      <div id="pozn-list"><div class="help">Načítám…</div></div>
+      <div class="row" style="display:block;margin-top:10px;">
+        <textarea id="pozn-new" placeholder="napiš připomínku (uvidí ji všichni, podepíše se tvým jménem) – např. předchozí záznam je chybně"></textarea>
+        <button class="full secondary" style="margin-top:8px;" onclick="addPoznamka('${existing.id}')">+ Přidat připomínku</button>
+      </div>
+    </div>`;
+}
+function loadPoznamky(recordId){
+  if(_poznUnsub){ try{ _poznUnsub(); }catch(e){} _poznUnsub = null; }
+  if(!document.getElementById('pozn-list')) return;
+  _poznUnsub = db.collection('zaznamy').doc(recordId).collection('poznamky')
+    .orderBy('createdAt','asc')
+    .onSnapshot(snap=>{
+      const el = document.getElementById('pozn-list');
+      if(!el) return;
+      if(snap.empty){ el.innerHTML = '<div class="help">Zatím žádná připomínka.</div>'; return; }
+      el.innerHTML = snap.docs.map(d=>{
+        const p = d.data();
+        const mine = p.autorUid===state.uid || (state.me && state.me.role==='admin');
+        return `<div class="list-edit">
+          <div class="le-main">
+            <div class="le-title" style="font-size:14px;font-weight:500;">${escapeHtml(p.text)}</div>
+            <div class="le-sub">✍ ${escapeHtml(p.autorJmeno||'?')}</div>
+          </div>
+          ${mine?`<button class="secondary" onclick="deletePoznamka('${recordId}','${d.id}')">✕</button>`:''}
+        </div>`;
+      }).join('');
+    }, err=>{ const el=document.getElementById('pozn-list'); if(el) el.innerHTML='<div class="help">Připomínky nelze načíst.</div>'; });
+}
+async function addPoznamka(recordId){
+  const ta = document.getElementById('pozn-new');
+  const t = (ta.value||'').trim();
+  if(!t){ toast('Napiš text připomínky'); return; }
+  try{
+    await db.collection('zaznamy').doc(recordId).collection('poznamky').add({
+      text:t, autorUid:state.uid, autorJmeno:state.me.jmeno,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    ta.value = '';
+    toast('✓ Připomínka přidána');
+  }catch(e){ alert('Nepodařilo se uložit: '+e.message); }
+}
+async function deletePoznamka(recordId, pid){
+  if(!confirm('Smazat tuto připomínku?')) return;
+  try{ await db.collection('zaznamy').doc(recordId).collection('poznamky').doc(pid).delete(); }
+  catch(e){ alert(e.message); }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   7) PŘEHLED / DESETIDENKA – filtry + součty po stavbách
+   ════════════════════════════════════════════════════════════════════ */
+const filt = { strojId:'', strojnikId:'', stavba:'', from:'', to:'' };
+function setPeriod(kind){
+  const cur = currentDecade();
+  if(kind==='dek'){ const r=decadeRange(cur.rok,cur.mesic,cur.dekada); filt.from=iso(cur.rok,cur.mesic,r.from); filt.to=iso(cur.rok,cur.mesic,r.to); }
+  else if(kind==='mes'){ const last=new Date(cur.rok,cur.mesic,0).getDate(); filt.from=iso(cur.rok,cur.mesic,1); filt.to=iso(cur.rok,cur.mesic,last); }
+  else if(kind==='min'){ let m=cur.mesic-1,y=cur.rok; if(m<1){m=12;y--;} const last=new Date(y,m,0).getDate(); filt.from=iso(y,m,1); filt.to=iso(y,m,last); }
+  else { filt.from=''; filt.to=''; }
+  renderPrehled();
+}
+function applyFilter(){
+  filt.strojId   = document.getElementById('flt-stroj').value;
+  filt.strojnikId= document.getElementById('flt-strojnik').value;
+  filt.stavba    = document.getElementById('flt-stavba').value;
+  filt.from      = document.getElementById('flt-from').value;
+  filt.to        = document.getElementById('flt-to').value;
+  renderPrehled();
+}
+function filteredZaznamy(){
+  return state.zaznamy.filter(z => {
+    if(filt.strojId && z.strojId!==filt.strojId) return false;
+    if(filt.strojnikId && z.strojnikId!==filt.strojnikId) return false;
+    if(filt.stavba && (z.stavbaText||'')!==filt.stavba) return false;
+    if(filt.from && z.datum < filt.from) return false;
+    if(filt.to && z.datum > filt.to) return false;
+    return true;
+  }).sort((a,b)=> a.datum < b.datum ? -1 : (a.datum>b.datum?1:0));
+}
+function renderPrehled(){
+  if(!state.me){ setRoot('login'); return; }
+  document.getElementById('page-title').innerHTML = 'Přehled';
+  document.getElementById('btn-logout').style.display = 'none';
+
+  const onlyMine = state.me.role!=='admin';
+  if(onlyMine && !filt.strojnikId) filt.strojnikId = state.me.id;
+
+  const rows = filteredZaznamy().filter(z => onlyMine ? z.strojnikId===state.me.id : true);
+
+  const bySt = {};
+  let sumMth=0;
+  rows.forEach(z => { const k=z.stavbaText||'(bez stavby)'; bySt[k]=(bySt[k]||0)+(Number(z.mth)||0); sumMth+=(Number(z.mth)||0); });
+  const stavbySum = Object.keys(bySt).sort().map(k =>
+    `<div class="stavba-sum"><span>${escapeHtml(k)}</span><b>${round1(bySt[k]).toFixed(1)} mth</b></div>`).join('');
+
+  const strojOpts = '<option value="">Všechny stroje</option>'+state.stroje.map(s=>`<option value="${s.id}" ${filt.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}</option>`).join('');
+  const strojnikOpts = '<option value="">Všichni strojníci</option>'+state.strojnici.map(s=>`<option value="${s.id}" ${filt.strojnikId===s.id?'selected':''}>${escapeHtml(s.jmeno)}</option>`).join('');
+  const stavbaVals = [...new Set(state.zaznamy.map(z=>z.stavbaText).filter(Boolean))].sort();
+  const stavbaOpts = '<option value="">Všechny stavby</option>'+stavbaVals.map(v=>`<option value="${escapeHtml(v)}" ${filt.stavba===v?'selected':''}>${escapeHtml(v)}</option>`).join('');
+
+  const tableRows = rows.map(z=>`
+    <tr onclick="navigate('den',{id:'${z.id}'})" style="cursor:pointer;">
+      <td>${isoToCz(z.datum)}</td>
+      <td>${escapeHtml(z.strojNazev||'')}</td>
+      <td>${escapeHtml(z.strojnikJmeno||'')}</td>
+      <td>${escapeHtml(z.stavbaText||'')}</td>
+      <td class="num">${z.stavCitadla!=null?z.stavCitadla:''}</td>
+      <td class="num">${z.mth!=null?round1(z.mth).toFixed(1):''}</td>
+      <td>${z.hodOd&&z.hodDo?z.hodOd+'–'+z.hodDo:''}</td>
+      <td style="text-align:center;">${z.tankoval?'⛽':''}</td>
+    </tr>`).join('');
+
+  document.getElementById('main').innerHTML = `
+    <div class="card no-print">
+      <h2>Filtry</h2>
+      <div class="chips">
+        <span class="chip" onclick="setPeriod('dek')">Tato dekáda</span>
+        <span class="chip" onclick="setPeriod('mes')">Tento měsíc</span>
+        <span class="chip" onclick="setPeriod('min')">Minulý měsíc</span>
+        <span class="chip" onclick="setPeriod('all')">Vše</span>
+      </div>
+      <div class="grid-2">
+        <div><label>Od</label><input id="flt-from" type="date" value="${filt.from}" onchange="applyFilter()"></div>
+        <div><label>Do</label><input id="flt-to" type="date" value="${filt.to}" onchange="applyFilter()"></div>
+      </div>
+      <div class="row" style="display:block;margin-top:8px;"><label>Stroj</label><select id="flt-stroj" onchange="applyFilter()">${strojOpts}</select></div>
+      ${onlyMine?'<input type="hidden" id="flt-strojnik" value="'+state.me.id+'">':`<div class="row" style="display:block;"><label>Strojník</label><select id="flt-strojnik" onchange="applyFilter()">${strojnikOpts}</select></div>`}
+      <div class="row" style="display:block;"><label>Stavba</label><select id="flt-stavba" onchange="applyFilter()">${stavbaOpts}</select></div>
+    </div>
+
+    <div class="card">
+      <h2>Součet motohodin po stavbách</h2>
+      ${stavbySum || '<div class="empty-msg">Žádná data pro tento filtr.</div>'}
+      ${rows.length?`<div class="stavba-sum" style="border:none;margin-top:6px;"><span><b>CELKEM</b></span><b>${round1(sumMth).toFixed(1)} mth</b> </div>`:''}
+    </div>
+
+    <div class="section-header"><span class="sh-title">Záznamy (${rows.length})</span><span class="sh-line"></span></div>
+    <div class="report-wrap">
+      <table class="report">
+        <thead><tr>
+          <th>Datum</th><th>Stroj</th><th>Strojník</th><th>Stavba</th>
+          <th>Počítadlo</th><th>Mth</th><th>Hodiny</th><th>⛽</th>
+        </tr></thead>
+        <tbody>${tableRows||''}</tbody>
+      </table>
+    </div>
+
+    <div class="row no-print" style="margin-top:14px;">
+      <button class="secondary" style="flex:1;" onclick="exportCSV()">📥 Stáhnout CSV</button>
+      <button class="secondary" style="flex:1;" onclick="window.print()">🖨 Tisk / PDF</button>
     </div>
   `;
+}
 
-  ['f-posOd','f-posDo','f-strOd','f-strDo'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => {
-      document.getElementById('f-posCelk').value = hoursDiff(
-        document.getElementById('f-posOd').value, document.getElementById('f-posDo').value).toFixed(1);
-      document.getElementById('f-strCelk').value = hoursDiff(
-        document.getElementById('f-strOd').value, document.getElementById('f-strDo').value).toFixed(1);
-    });
+function exportCSV(){
+  const onlyMine = state.me.role!=='admin';
+  const rows = filteredZaznamy().filter(z => onlyMine ? z.strojnikId===state.me.id : true);
+  const head = ['Datum','Stroj','Strojnik','Stavba','Stav pocitadla','Mth','Od','Do','Tankovani','Poznamka'];
+  const lines = [head.join(';')];
+  rows.forEach(z=>{
+    lines.push([
+      z.datum, csv(z.strojNazev), csv(z.strojnikJmeno), csv(z.stavbaText),
+      z.stavCitadla!=null?z.stavCitadla:'', z.mth!=null?round1(z.mth):'',
+      z.hodOd||'', z.hodDo||'', z.tankoval?'ano':'', csv(z.poznamka)
+    ].join(';'));
   });
+  const bySt={}; rows.forEach(z=>{const k=z.stavbaText||'(bez stavby)';bySt[k]=(bySt[k]||0)+(Number(z.mth)||0);});
+  lines.push(''); lines.push('Soucet po stavbach;mth');
+  Object.keys(bySt).sort().forEach(k=> lines.push(csv(k)+';'+round1(bySt[k])));
+  const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'desetidenka_'+(filt.from||'vse')+'_'+(filt.to||'')+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('✓ CSV staženo');
+}
+function csv(s){ s=String(s==null?'':s); return /[;"\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+
+/* ════════════════════════════════════════════════════════════════════
+   8) ČÍSELNÍKY (jen vedoucí/admin) – Stroje / Stavby / Strojníci
+   ════════════════════════════════════════════════════════════════════ */
+let ciselnikTab = 'stroje';
+function renderCiselniky(){
+  if(!state.me || state.me.role!=='admin'){ setRoot('home'); return; }
+  document.getElementById('page-title').innerHTML = 'Číselníky';
+  document.getElementById('btn-logout').style.display = 'none';
+
+  const tabBtn = (k,l)=>`<div class="tab ${ciselnikTab===k?'active':''}" onclick="ciselnikTab='${k}';renderCiselniky()">${l}</div>`;
+  let body='';
+  if(ciselnikTab==='stroje') body = ciselnikStroje();
+  else if(ciselnikTab==='stavby') body = ciselnikStavby();
+  else body = ciselnikStrojnici();
+
+  document.getElementById('main').innerHTML = `
+    <div class="tabs">${tabBtn('stroje','Stroje')}${tabBtn('stavby','Stavby')}${tabBtn('strojnici','Strojníci')}</div>
+    ${body}`;
 }
 
-function copyPosadkaToStroj(){
-  const posOd = document.getElementById('f-posOd').value;
-  const posDo = document.getElementById('f-posDo').value;
-  if(!posOd || !posDo){ toast('Nejdřív vyplň hodiny posádky'); return; }
-  document.getElementById('f-strOd').value = posOd;
-  document.getElementById('f-strDo').value = posDo;
-  document.getElementById('f-strCelk').value = hoursDiff(posOd, posDo).toFixed(1);
-  toast('✓ Hodiny stroje zkopírovány');
+function ciselnikStroje(){
+  const list = state.stroje.slice().sort((a,b)=> (a.nazev||'').localeCompare(b.nazev||''));
+  return `
+    <div class="card">
+      <h2>Přidat stroj</h2>
+      <input id="ns-nazev" placeholder="Název (např. Finišer F-1800)">
+      <div class="grid-2" style="margin-top:8px;">
+        <input id="ns-typ" placeholder="Typ (válec…)">
+        <input id="ns-spz" placeholder="SPZ / inv. č.">
+      </div>
+      <button class="full green" style="margin-top:10px;" onclick="addStroj()">+ Přidat stroj</button>
+    </div>
+    ${list.map(s=>`
+      <div class="list-edit ${s.aktivni===false?'inactive':''}">
+        <div class="le-main">
+          <div class="le-title">${escapeHtml(s.nazev)}</div>
+          <div class="le-sub">${escapeHtml(s.typ||'')}${s.spz?' · '+escapeHtml(s.spz):''}${s.lastMoto!=null?' · počítadlo '+s.lastMoto:''}</div>
+        </div>
+        <button class="secondary" onclick="toggleAktiv('stroje','${s.id}',${s.aktivni===false})">${s.aktivni===false?'Obnovit':'Skrýt'}</button>
+      </div>`).join('') || '<div class="empty-msg">Zatím žádný stroj.</div>'}`;
+}
+async function addStroj(){
+  const nazev=(document.getElementById('ns-nazev').value||'').trim();
+  if(nazev.length<2){ toast('Zadej název'); return; }
+  await db.collection('stroje').doc(uid('stroj')).set({
+    nazev, typ:(document.getElementById('ns-typ').value||'').trim(),
+    spz:(document.getElementById('ns-spz').value||'').trim(), aktivni:true,
+    lastMoto:null, lastMotoDate:null
+  });
+  toast('✓ Stroj přidán');
 }
 
-function saveDen(key, den){
-  const get = id => document.getElementById(id).value;
-  const r = {
-    stavba: (get('f-stavba') || '').trim(),
-    popis:  (get('f-popis')  || '').trim(),
-    mnozstvi:  get('f-mnozstvi'),
-    km:        get('f-km'),
-    posOd: get('f-posOd'), posDo: get('f-posDo'),
-    strOd: get('f-strOd'), strDo: get('f-strDo'),
-    hNezaj:  get('f-hNezaj'),
-    hOpStav: get('f-hOpStav'),
-    hOpDil:  get('f-hOpDil'),
-    hUdr:    get('f-hUdr'),
-    hPres:   get('f-hPres'),
-    hJine:   get('f-hJine'),
-    phmBenzin: get('f-phmB'),
-    phmNafta:  get('f-phmN'),
-    phmMotO:   get('f-phmMO'),
-    phmOstO:   get('f-phmOO'),
-  };
-  if(!r.stavba && !r.popis && !r.posOd && !r.strOd){ toast('Vyplň aspoň stavbu nebo hodiny'); return; }
-  const hStr = hoursDiff(r.strOd, r.strDo);
-  const rozpadSum = ['hNezaj','hOpStav','hOpDil','hUdr','hPres','hJine']
-    .reduce((s,k)=> s + (parseFloat(r[k])||0), 0);
-  if(rozpadSum > hStr + 0.05 && hStr > 0){
-    if(!confirm(`Součet rozpadu (${rozpadSum.toFixed(1)} h) přesahuje hodiny stroje (${hStr.toFixed(1)} h). Uložit i tak?`)) return;
+function ciselnikStavby(){
+  const list = state.stavby.slice().sort((a,b)=> (a.kod||a.nazev||'').localeCompare(b.kod||b.nazev||''));
+  return `
+    <div class="card">
+      <h2>Přidat stavbu / akci</h2>
+      <input id="nv-kod" placeholder="Krátký název (např. Horažďovice)">
+      <input id="nv-nazev" placeholder="Plný název (nepovinné)" style="margin-top:8px;">
+      <button class="full green" style="margin-top:10px;" onclick="addStavba()">+ Přidat stavbu</button>
+    </div>
+    ${list.map(s=>`
+      <div class="list-edit ${s.aktivni===false?'inactive':''}">
+        <div class="le-main">
+          <div class="le-title">${escapeHtml(s.kod||s.nazev)}</div>
+          ${s.nazev&&s.nazev!==s.kod?`<div class="le-sub">${escapeHtml(s.nazev)}</div>`:''}
+        </div>
+        <button class="secondary" onclick="toggleAktiv('stavby','${s.id}',${s.aktivni===false})">${s.aktivni===false?'Obnovit':'Skrýt'}</button>
+      </div>`).join('') || '<div class="empty-msg">Zatím žádná stavba.</div>'}`;
+}
+async function addStavba(){
+  const kod=(document.getElementById('nv-kod').value||'').trim();
+  if(kod.length<2){ toast('Zadej název'); return; }
+  await db.collection('stavby').doc(uid('stavba')).set({
+    kod, nazev:(document.getElementById('nv-nazev').value||'').trim(), aktivni:true
+  });
+  toast('✓ Stavba přidána');
+}
+
+function ciselnikStrojnici(){
+  const list = state.strojnici.slice().sort((a,b)=> (a.jmeno||'').localeCompare(b.jmeno||''));
+  return `
+    <div class="card">
+      <h2>Přidat strojníka</h2>
+      <input id="np-jmeno" placeholder="Jméno a příjmení">
+      <button class="full green" style="margin-top:10px;" onclick="addStrojnik()">+ Přidat strojníka</button>
+      <p class="help">Strojník se pak přihlásí výběrem svého jména. PIN je nepovinný.</p>
+    </div>
+    ${list.map(s=>`
+      <div class="list-edit ${s.aktivni===false?'inactive':''}">
+        <div class="le-main">
+          <div class="le-title">${escapeHtml(s.jmeno)} ${s.role==='admin'?'<span style="color:var(--accent2);font-size:12px;">★</span>':''}</div>
+          <div class="le-sub">${s.claimedUid?'přihlášen':'nepřihlášen'}${s.pinHash?' · PIN':''}</div>
+        </div>
+        <button class="secondary" onclick="setPin('${s.id}')">PIN</button>
+        ${s.claimedUid?`<button class="secondary" onclick="unclaim('${s.id}')">Odpojit</button>`:''}
+        <button class="secondary" onclick="toggleRole('${s.id}','${s.role||'strojnik'}')">${s.role==='admin'?'➖admin':'➕admin'}</button>
+      </div>`).join('')}`;
+}
+async function addStrojnik(){
+  const jmeno=(document.getElementById('np-jmeno').value||'').trim();
+  if(jmeno.length<2){ toast('Zadej jméno'); return; }
+  await db.collection('strojnici').doc(uid('strojnik')).set({
+    jmeno, role:'strojnik', aktivni:true, claimedUid:null, pinHash:null,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  toast('✓ Strojník přidán');
+}
+async function setPin(id){
+  const pin = prompt('Nastav 4-místný PIN (prázdné = bez PINu):');
+  if(pin==null) return;
+  const pinHash = pin.trim()==='' ? null : await sha256(pin.trim());
+  await db.collection('strojnici').doc(id).update({ pinHash });
+  toast('✓ PIN nastaven');
+}
+async function unclaim(id){
+  if(!confirm('Odpojit zařízení tohoto strojníka?')) return;
+  const t = state.strojnici.find(x=>x.id===id);
+  if(t && t.claimedUid) await db.collection('uids').doc(t.claimedUid).delete().catch(()=>{});
+  await db.collection('strojnici').doc(id).update({ claimedUid:null });
+  toast('✓ Odpojeno');
+}
+async function toggleRole(id, role){
+  await db.collection('strojnici').doc(id).update({ role: role==='admin'?'strojnik':'admin' });
+  toast('✓ Změněno');
+}
+async function toggleAktiv(coll, id, makeActive){
+  await db.collection(coll).doc(id).update({ aktivni: !!makeActive });
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   9) START – Firebase init, auth, realtime subscriptions
+   ════════════════════════════════════════════════════════════════════ */
+function decideStart(){
+  if(state.started) return;
+  if(!state.loaded.strojnici) return;
+  state.started = true;
+  state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
+  setRoot(state.me ? 'home' : 'login');
+}
+
+function watchAuthState(){
+  const prevMeId = state.me ? state.me.id : null;
+  state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
+  const meId = state.me ? state.me.id : null;
+  if(prevMeId !== meId){
+    setRoot(state.me ? 'home' : 'login');
+  } else {
+    rerender();
   }
-  const d = getDB();
-  d.vykazy[key].dny[den] = r;
-  if(r.stavba && !d.stavby.includes(r.stavba)) d.stavby.push(r.stavba);
-  setDB(d);
-  toast('✓ Den uložen');
-  goBack();
-}
-function deleteDen(key, den){
-  if(!confirm('Smazat zápis tohoto dne?')) return;
-  const d = getDB();
-  delete d.vykazy[key].dny[den];
-  setDB(d);
-  toast('🗑 Smazáno');
-  goBack();
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  EXPORT XLSX (ExcelJS) - načte šablonu, vyplní buňky, zachová formátování
-// ════════════════════════════════════════════════════════════════════
-async function exportXlsx(key){
-  const d = getDB();
-  const v = d.vykazy[key];
-  if(!v){ toast('Není co exportovat'); return; }
-  const parts = key.split('_');
-  const dekada = Number(parts.pop());
-  const ym = parts.pop();
-  const strojId = parts.join('_');
-  const stroj = d.stroje.find(s => s.id === strojId);
-  const [rokStr, mesicNum] = ym.split('-');
-  const rok = Number(rokStr), mesic = Number(mesicNum);
-  const range = decadeRange(rok, mesic, dekada);
+function startFirebase(){
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  db.enablePersistence({ synchronizeTabs:true }).catch(()=>{});
 
-  try {
-    toast('⏳ Generuji Excel…', 3000);
-    const resp = await fetch('sablona/Vykaz_stavebniho_stroje_sablona.xlsx');
-    if(!resp.ok) throw new Error('Šablona nenalezena (sablona/Vykaz_stavebniho_stroje_sablona.xlsx)');
-    const buf = await resp.arrayBuffer();
-
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-    const ws = wb.worksheets[0];
-
-    const set = (addr, val) => {
-      if(val === '' || val == null) return;
-      ws.getCell(addr).value = val;
-    };
-
-    // Hlavička
-    set('K3', mesicNazev(mesic) + ' ' + rok);
-    set('N6', stroj.inv || stroj.nazev);
-    set('T6', d.profile ? d.profile.name : '');
-
-    let sumPos = 0, sumStr = 0, sumMnoz = 0, sumKm = 0;
-    const sumH = { L:0,M:0,N:0,O:0,P:0,Q:0 };
-    const sumPhm = { R:0,S:0,T:0,U:0 };
-
-    for(let day = range.from; day <= range.to; day++){
-      const row = 10 + (day - range.from + 1);
-      const r = v.dny[day];
-      if(!r) continue;
-      set('A'+row, day + '.' + mesic + '.');
-      set('B'+row, r.stavba || '');
-      set('C'+row, r.popis || '');
-      if(r.mnozstvi !== '' && r.mnozstvi != null) { set('D'+row, Number(r.mnozstvi)); sumMnoz += Number(r.mnozstvi)||0; }
-      if(r.km !== '' && r.km != null) { set('E'+row, Number(r.km)); sumKm += Number(r.km)||0; }
-      set('F'+row, r.posOd || '');
-      set('G'+row, r.posDo || '');
-      const hPos = hoursDiff(r.posOd, r.posDo);
-      if(hPos > 0) { set('H'+row, hPos); sumPos += hPos; }
-      set('I'+row, r.strOd || '');
-      set('J'+row, r.strDo || '');
-      const hStr = hoursDiff(r.strOd, r.strDo);
-      if(hStr > 0) { set('K'+row, hStr); sumStr += hStr; }
-      const map = { hNezaj:'L', hOpStav:'M', hOpDil:'N', hUdr:'O', hPres:'P', hJine:'Q' };
-      Object.keys(map).forEach(k => {
-        const val = r[k];
-        if(val !== '' && val != null){ set(map[k]+row, Number(val)); sumH[map[k]] += Number(val) || 0; }
-      });
-      const phm = { phmBenzin:'R', phmNafta:'S', phmMotO:'T', phmOstO:'U' };
-      Object.keys(phm).forEach(k => {
-        const val = r[k];
-        if(val !== '' && val != null){ set(phm[k]+row, Number(val)); sumPhm[phm[k]] += Number(val) || 0; }
-      });
-    }
-
-    // Součty za dekádu - řádek 21
-    if(sumMnoz) set('D21', round1(sumMnoz));
-    if(sumKm)   set('E21', round1(sumKm));
-    if(sumPos)  set('H21', round1(sumPos));
-    if(sumStr)  set('K21', round1(sumStr));
-    Object.keys(sumH).forEach(c => { if(sumH[c]) set(c+'21', round1(sumH[c])); });
-    Object.keys(sumPhm).forEach(c => { if(sumPhm[c]) set(c+'21', round1(sumPhm[c])); });
-
-    // Motohodiny
-    if(v.header.motoStart) set('N23', Number(v.header.motoStart));
-    if(v.header.motoEnd)   set('N24', Number(v.header.motoEnd));
-
-    const out = await wb.xlsx.writeBuffer();
-    const blob = new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const a = document.createElement('a');
-    const fname = `Vykaz_${(stroj.nazev||'stroj').replace(/[^a-zA-Z0-9_-]/g,'_')}_${rok}-${pad2(mesic)}_dek${dekada}.xlsx`;
-    a.href = URL.createObjectURL(blob);
-    a.download = fname;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    toast('✓ Excel stažen', 2200);
-  } catch(e){
-    console.error(e);
-    alert('Export selhal: ' + e.message);
-  }
+  auth.onAuthStateChanged(user => {
+    if(!user){ auth.signInAnonymously().catch(e=>{ alert('Přihlášení selhalo: '+e.message); }); return; }
+    state.uid = user.uid;
+    subscribeAll();
+  });
+  auth.signInAnonymously().catch(e=>{ console.error(e); });
 }
-function round1(n){ return Math.round(n*10)/10; }
 
-// ── SW registrace ────────────────────────────────────────
+function subscribeAll(){
+  if(state._subscribed) return;
+  state._subscribed = true;
+
+  db.collection('strojnici').onSnapshot(snap=>{
+    state.strojnici = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    state.loaded.strojnici = true;
+    if(!state.started) decideStart(); else watchAuthState();
+  }, err=>console.error('strojnici', err));
+
+  db.collection('stroje').onSnapshot(snap=>{
+    state.stroje = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    state.loaded.stroje = true; rerender();
+  }, err=>console.error('stroje', err));
+
+  db.collection('stavby').onSnapshot(snap=>{
+    state.stavby = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    state.loaded.stavby = true; rerender();
+  }, err=>console.error('stavby', err));
+
+  db.collection('zaznamy').onSnapshot(snap=>{
+    state.zaznamy = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    state.loaded.zaznamy = true; rerender();
+  }, err=>console.error('zaznamy', err));
+}
+
+/* ── SW registrace ─────────────────────────────────────── */
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('service-worker.js').catch(()=>{});
   });
 }
 
-// ── Start ────────────────────────────────────────────────
+/* ── Start ─────────────────────────────────────────────── */
 (function start(){
-  const d = getDB();
-  if(d.profile && d.profile.name) setRoot('home');
-  else setRoot('login');
+  if(!FIREBASE_CONFIGURED){ setRoot('setup'); return; }
+  startFirebase();
 })();
 </script>
 </body>
