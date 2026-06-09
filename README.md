@@ -29,33 +29,47 @@ Když stroj řídil jiný den jiný člověk, appka stejně najde poslední stav
 
 ## Firebase je už nastavený
 
-Projekt **`vykazy-stroju`** (Spark plán) má hotovo: registrovanou web aplikaci (config je v `index.html`), zapnuté **Anonymous** přihlášení, **Firestore** databázi (region eur3) a publikovaná **pravidla** (viz níže). Není potřeba nic dalšího – stačí appku nasadit.
+Projekt **`vykazy-stroju`**: web aplikace (config v `index.html`), **Firestore** (region eur3), **Google přihlášení** (auth gate) a níže uvedená pravidla. Doporučeno navíc zapnout **App Check** (reCAPTCHA) a v `index.html` doplnit `RECAPTCHA_SITE_KEY`.
 
-### Firestore Rules (aktuálně publikované)
+> **Identita = Google účet.** Přihlášení ověří Google → nikdo se nevydává za jiného. `signedIn()` v pravidlech = ověřený Google uživatel (ne anonym). Strojník doc je klíčovaný Google `uid`.
 
-Záznam smí upravit/smazat jen jeho autor nebo administrátor. Číselníky a stavy počítadel vidí všichni přihlášení (nutné pro výpočet Mth a přehled vedoucího). Připomínky může přidat kdokoli, ale cizí nepřepíše. Admina pravidla poznají přes pomocnou kolekci `uids` (mapuje zařízení → strojníka), kterou appka plní sama.
+### Co zapnout v konzoli (jednorázově)
+
+1. **Authentication → Sign-in method → Google → Enable** (zadat support e-mail).
+2. **Authentication → Settings → Authorized domains** → přidat `pripravar.github.io`.
+3. **App Check** → registrovat web app s **reCAPTCHA v3**, site key vložit do `RECAPTCHA_SITE_KEY` v `index.html`, pak App Check **Enforce** pro Firestore.
+
+### Firestore Rules (Google přihlášení)
+
+Admin = e-mail allowlist (Ondřej) **nebo** kolekce `admins/{uid}` (spravuje admin) — **nejde zfalšovat**. Nikdo si nenastaví roli admina. Číselníky a záznamy čtou jen přihlášení Googlem; mazání strojníků/strojů/staveb jen admin.
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn(){ return request.auth != null; }
-    function myStrojnikId(){
-      return get(/databases/$(database)/documents/uids/$(request.auth.uid)).data.strojnikId;
+    // Přihlášený = ověřený účet (Google/telefon). Anonymní tokeny odmítnout.
+    function signedIn(){
+      return request.auth != null
+             && request.auth.token.firebase.sign_in_provider != 'anonymous';
     }
     function isAdmin(){
-      return signedIn()
-        && exists(/databases/$(database)/documents/uids/$(request.auth.uid))
-        && get(/databases/$(database)/documents/strojnici/$(myStrojnikId())).data.role == 'admin';
+      return signedIn() && (request.auth.token.email == 'arasid33@gmail.com'
+             || exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
     }
 
-    match /uids/{uid} {
-      allow read:  if signedIn();
-      allow write: if signedIn() && uid == request.auth.uid;
+    match /admins/{uid} { allow read: if signedIn(); allow write: if isAdmin(); }
+
+    match /strojnici/{id} {
+      allow read:   if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.role == 'strojnik';
+      allow update: if isAdmin()
+                    || (resource.data.uid == request.auth.uid
+                        && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
     }
-    match /strojnici/{id} { allow read, write: if signedIn(); }
-    match /stroje/{id}    { allow read, write: if signedIn(); }
-    match /stavby/{id}    { allow read, write: if signedIn(); }
+    match /stroje/{id} { allow read: if signedIn(); allow create, update: if signedIn(); allow delete: if isAdmin(); }
+    match /stavby/{id} { allow read: if signedIn(); allow create, update: if signedIn(); allow delete: if isAdmin(); }
 
     match /zaznamy/{id} {
       allow read:   if signedIn();
@@ -63,7 +77,6 @@ service cloud.firestore {
       allow update: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
       allow delete: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
 
-      // Připomínky – přidat smí kdokoli, smazat/upravit jen autor připomínky nebo admin.
       match /poznamky/{pid} {
         allow read:   if signedIn();
         allow create: if signedIn() && request.resource.data.autorUid == request.auth.uid;

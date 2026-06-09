@@ -5,6 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
 <title>Desetidenka strojů</title>
 
+<!-- Bezpečnostní hlavička (CSP): omezuje, odkud lze načítat skripty a kam posílat data.
+     'unsafe-inline' u skriptů je nutné kvůli inline onclick v appce; CSP přesto blokuje
+     načtení cizích skriptů a odesílání dat na neznámé servery (pojistka proti XSS exfiltraci). -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://www.google.com https://apis.google.com;
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data: https:;
+  font-src 'self' data:;
+  connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://firestore.googleapis.com https://content-firebaseappcheck.googleapis.com;
+  frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com https://www.google.com;
+">
+
 <!-- PWA -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,6 +30,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
 
 <style>
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -176,6 +190,32 @@ button.full { width:100%; }
   background:linear-gradient(135deg,var(--green) 0%,#2f9e63 100%);
   border-radius:var(--radius); margin-bottom:14px; }
 
+/* ── Přihlašovací obrazovka (auth gate) ─────────────────── */
+#auth-gate { position:fixed; inset:0; z-index:9000;
+  background:linear-gradient(135deg,#0f3460 0%,#16213e 60%,#1a1a2e 100%);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  padding-top:env(safe-area-inset-top); }
+#auth-gate.hide { display:none; }
+.auth-box { background:var(--panel); border:1px solid var(--border); border-radius:14px;
+  padding:24px 22px; width:min(94vw,360px); display:flex; flex-direction:column; gap:14px;
+  box-shadow:0 8px 28px rgba(0,0,0,0.4); }
+.auth-box h2 { font-size:20px; color:var(--accent2); text-align:center; }
+.auth-box p { font-size:13px; color:var(--text2); text-align:center; line-height:1.45; }
+.auth-google { background:#fff; color:#3c4043; border:none; border-radius:10px;
+  padding:13px 14px; font-size:15px; font-weight:600; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:10px; width:100%; }
+.auth-google:active { background:#f1f3f4; }
+.auth-google img { width:18px; height:18px; }
+.auth-input { background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+  color:var(--text); padding:12px 14px; font-size:16px; width:100%; box-sizing:border-box; }
+.auth-input:focus { outline:none; border-color:var(--accent2); }
+.auth-note { background:rgba(72,187,120,0.10); border:1px solid rgba(72,187,120,0.30);
+  border-radius:8px; padding:8px 10px; font-size:11px; line-height:1.45; color:var(--text2); }
+.auth-back { background:transparent; color:var(--text2); border:1px solid var(--border);
+  border-radius:10px; padding:10px 14px; font-size:13px; cursor:pointer; width:100%; }
+.auth-back:active { background:var(--panel2); }
+#auth-error { color:#ff6b81; font-size:12px; text-align:center; min-height:14px; }
+
 table.report { width:100%; border-collapse:collapse; font-size:13px; }
 table.report th, table.report td { border:1px solid var(--border); padding:6px 8px; text-align:left; }
 table.report th { background:var(--panel2); color:var(--text2); font-size:11px;
@@ -241,6 +281,44 @@ table.report td.num { text-align:right; font-variant-numeric:tabular-nums; }
   <button id="btn-logout" onclick="logout()" title="Odhlásit" style="display:none;">⏻</button>
 </header>
 
+<!-- ═══ Přihlašovací obrazovka – viditelná dokud uživatel není přihlášen ═══ -->
+<div id="auth-gate">
+  <div class="auth-box">
+    <h2>🚜 Desetidenka strojů</h2>
+    <div id="auth-view-main">
+      <p>Přihlas se svým Google účtem. Tvoje jméno a zápisy pak budou bezpečně jen tvoje.</p>
+      <button class="auth-google" onclick="signInWithGoogle()">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="">
+        Přihlásit přes Google
+      </button>
+      <div class="auth-note">🔒 Data vidí jen přihlášení lidé z firmy. Bez přihlášení se k nim nikdo nedostane.</div>
+      <button class="auth-back" onclick="showPhoneView()">📱 Nemáš Google? Přihlásit přes SMS</button>
+    </div>
+
+    <div id="auth-view-phone" style="display:none;">
+      <p>Přihlášení SMS kódem (jen <b>české číslo +420</b>).</p>
+      <input id="phone-input" class="auth-input" type="tel" inputmode="tel" placeholder="+420 600 123 456" autocomplete="tel" value="+420 ">
+      <button id="auth-send-sms" class="auth-google" onclick="sendSmsCode()">📨 Odeslat SMS kód</button>
+      <button class="auth-back" onclick="showMainView()">↩ Zpět na Google</button>
+      <div class="auth-note">⚠️ SMS je jen pro nouzi. Google přihlášení je rychlejší a zdarma.</div>
+    </div>
+
+    <div id="auth-view-code" style="display:none;">
+      <p>Zadej 6-místný kód z SMS.</p>
+      <input id="sms-code-input" class="auth-input" type="tel" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+      <button class="auth-google" onclick="verifySmsCode()">✓ Ověřit kód</button>
+      <button class="auth-back" onclick="showPhoneView()">↩ Změnit číslo</button>
+    </div>
+
+    <div id="auth-view-name" style="display:none;">
+      <p>Vítej! Jak se jmenuješ? (objeví se u tvých zápisů)</p>
+      <input id="auth-name-input" class="auth-input" placeholder="Jméno a příjmení" autocomplete="name">
+      <button class="auth-google" style="background:var(--green);color:#fff;" onclick="finishNameRegistration()">Pokračovat</button>
+    </div>
+    <div id="auth-error"></div>
+  </div>
+</div>
+
 <main id="main"><div class="empty-msg">Načítám…</div></main>
 <div class="toast" id="toast"></div>
 
@@ -257,6 +335,13 @@ const firebaseConfig = {
   appId:             "1:1092189517109:web:23da2d8f54362c9cfc487c"
 };
 const FIREBASE_CONFIGURED = !JSON.stringify(firebaseConfig).includes("PASTE_");
+
+// App Check (ochrana proti zneužití API). Site key z Firebase konzole → App Check → reCAPTCHA v3.
+// Dokud je placeholder, App Check se nezapne (appka funguje normálně).
+const RECAPTCHA_SITE_KEY = "PASTE_RECAPTCHA_SITE_KEY";
+
+// Vedoucí/admin – klient (pro UI). AUTORITATIVNÍ je e-mail allowlist v Firestore pravidlech.
+const ADMIN_EMAILS = ["arasid33@gmail.com"];
 
 /* ── Pomocné funkce ─────────────────────────────────────── */
 function pad2(n){ return String(n).padStart(2,'0'); }
@@ -310,12 +395,14 @@ function toast(msg, ms){
 
 /* ── Stav aplikace (cache z Firestore) ─────────────────── */
 const state = {
-  uid: null, me: null,
-  strojnici: [], stroje: [], stavby: [], zaznamy: [],
+  uid: null, email: null, me: null,
+  strojnici: [], stroje: [], stavby: [], zaznamy: [], adminUids: [],
   loaded: { strojnici:false, stroje:false, stavby:false, zaznamy:false },
-  started: false
+  authReady: false
 };
 let db = null, auth = null;
+
+function isAdminEmail(e){ return !!e && ADMIN_EMAILS.map(x=>x.toLowerCase()).includes(String(e).toLowerCase()); }
 
 /* identifikace stroje pro řetězec počítadla (per STROJ, ne per strojník) */
 function zStrojKey(z){ return z.strojId ? ('id:'+z.strojId) : ('man:'+slug(z.strojNazev)); }
@@ -418,96 +505,97 @@ function renderSetup(){
 function renderLogin(){
   document.getElementById('page-title').innerHTML = 'Přihlášení';
   document.getElementById('btn-logout').style.display = 'none';
-  const lidi = state.strojnici.filter(s => s.aktivni !== false);
-
-  let inner;
-  if(!state.loaded.strojnici){
-    inner = '<div class="empty-msg">Načítám seznam…</div>';
-  } else if(lidi.length === 0){
-    inner = `
-      <div class="card">
-        <h2>Zatím tu není žádný strojník</h2>
-        <p style="margin-bottom:10px;">Přidej první jméno – to bude zároveň <b>správce</b> (vedoucí), který pak spravuje seznam strojníků, strojů a staveb.</p>
-        <label>Jméno a příjmení</label>
-        <input id="first-name" placeholder="např. Jan Novák" autocomplete="name">
-        <button class="full green" style="margin-top:10px;" onclick="createFirstPerson()">Vytvořit a přihlásit jako správce</button>
-      </div>`;
-  } else {
-    inner = `
-      <div class="card">
-        <h2>Kdo jsi?</h2>
-        ${lidi.map(s => `
-          <button class="name-btn" onclick="pickName('${s.id}')">
-            <span class="nb-ava">${escapeHtml((s.jmeno||'?').trim().charAt(0).toUpperCase())}</span>
-            <span>${escapeHtml(s.jmeno)}${s.role==='admin'?' <span style="font-size:12px;color:var(--accent2);">★ vedoucí</span>':''}</span>
-          </button>`).join('')}
-      </div>
-      <div class="card">
-        <h2>Nejsi v seznamu? Přidej se</h2>
-        <label>Jméno a příjmení</label>
-        <input id="self-name" placeholder="např. Jan Novák" autocomplete="name">
-        <button class="full green" style="margin-top:10px;" onclick="addSelf()">➕ Přidat se a přihlásit</button>
-      </div>`;
-  }
-  document.getElementById('main').innerHTML = inner;
+  document.getElementById('main').innerHTML = '';
+  showGate('main');
 }
 
-async function addSelf(){
-  const jmeno = (document.getElementById('self-name').value||'').trim();
-  if(jmeno.length < 2){ toast('Zadej jméno'); return; }
-  const exists = state.strojnici.find(s => slug(s.jmeno)===slug(jmeno));
-  if(exists){ toast('Toto jméno už existuje – vyber ho ze seznamu'); return; }
+/* ── Google přihlášení (auth gate) ─────────────────────── */
+function showGate(view){ document.getElementById('auth-gate').classList.remove('hide'); if(view) _setAuthView(view); }
+function hideGate(){ document.getElementById('auth-gate').classList.add('hide'); }
+function _setAuthView(name){
+  ['main','phone','code','name'].forEach(v=>{ const el=document.getElementById('auth-view-'+v); if(el) el.style.display=(v===name)?'block':'none'; });
+}
+function showMainView(){ showAuthError(''); _setAuthView('main'); }
+function showPhoneView(){ showAuthError(''); _setAuthView('phone'); }
+function showAuthError(msg){ const el=document.getElementById('auth-error'); if(el) el.textContent=msg||''; }
+
+/* ── SMS přihlášení (jen české číslo +420) ─────────────── */
+// Normalizuj na E.164 a povol JEN +420 (9 číslic).
+function czPhoneE164(raw){
+  let d = String(raw||'').trim().replace(/^00/, '+').replace(/[^\d+]/g,'');
+  if(d.indexOf('+420')===0) d = d.slice(4);
+  else if(d.indexOf('+')===0) return null;          // jiná předvolba (SK…) → zakázat
+  else if(d.indexOf('420')===0 && d.length===12) d = d.slice(3);
+  d = d.replace(/\D/g,'');
+  if(d.length!==9) return null;                      // české číslo = 9 číslic
+  return '+420'+d;
+}
+function sendSmsCode(){
+  if(!FIREBASE_CONFIGURED){ showAuthError('⚠ Firebase není nakonfigurován.'); return; }
+  const phone = czPhoneE164(document.getElementById('phone-input').value);
+  if(!phone){ showAuthError('Zadej platné české číslo (+420 a 9 číslic).'); return; }
+  showAuthError('⏳ Odesílám SMS…');
   try{
-    const id = uid('strojnik');
-    await db.collection('strojnici').doc(id).set({
-      jmeno, role:'strojnik', aktivni:true, claimedUid: state.uid, pinHash:null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    if(!window._smsVerifier){
+      window._smsVerifier = new firebase.auth.RecaptchaVerifier('auth-send-sms', { size:'invisible' });
+    }
+  }catch(e){ showAuthError('Chyba reCAPTCHA: '+e.message); return; }
+  auth.signInWithPhoneNumber(phone, window._smsVerifier)
+    .then(function(res){
+      window._smsConfirmation = res;
+      showAuthError('');
+      _setAuthView('code');
+      const c=document.getElementById('sms-code-input'); if(c){ c.value=''; c.focus(); }
+    })
+    .catch(function(err){
+      showAuthError('SMS se nepodařilo odeslat: '+(err.message||err.code));
+      try{ if(window._smsVerifier){ window._smsVerifier.clear(); window._smsVerifier=null; } }catch(e){}
     });
-    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
-    toast('✓ Vítej, '+jmeno);
-  }catch(e){ alert('Nepodařilo se přidat: '+e.message); }
+}
+function verifySmsCode(){
+  const code = (document.getElementById('sms-code-input').value||'').trim();
+  if(code.length<6){ showAuthError('Zadej 6-místný kód.'); return; }
+  if(!window._smsConfirmation){ showAuthError('Nejdřív si nech poslat SMS.'); return; }
+  showAuthError('⏳ Ověřuji…');
+  window._smsConfirmation.confirm(code)
+    .then(function(){ showAuthError(''); /* onAuthStateChanged → resolveMe */ })
+    .catch(function(err){ showAuthError('Špatný kód: '+(err.message||err.code)); });
 }
 
-async function createFirstPerson(){
-  const jmeno = (document.getElementById('first-name').value||'').trim();
-  if(jmeno.length < 2){ toast('Zadej jméno'); return; }
-  try{
-    const id = uid('strojnik');
-    await db.collection('strojnici').doc(id).set({
-      jmeno, role:'admin', aktivni:true, claimedUid: state.uid, pinHash:null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+function signInWithGoogle(){
+  if(!FIREBASE_CONFIGURED){ showAuthError('⚠ Firebase ještě není nakonfigurován.'); return; }
+  const provider = new firebase.auth.GoogleAuthProvider();
+  showAuthError('⏳ Otvírám Google přihlášení…');
+  // Popup nejdřív (na iOS PWA funguje), redirect jako fallback.
+  auth.signInWithPopup(provider)
+    .then(()=> showAuthError(''))
+    .catch(err=>{
+      const code = err && err.code;
+      if(code==='auth/popup-blocked' || code==='auth/popup-closed-by-user' ||
+         code==='auth/cancelled-popup-request' || code==='auth/operation-not-supported-in-this-environment'){
+        showAuthError('⏳ Přesměrovávám na Google…');
+        auth.signInWithRedirect(provider).catch(e2=> showAuthError('Chyba přihlášení: '+(e2.message||e2.code)));
+      } else {
+        showAuthError('Chyba přihlášení: '+(err.message||code));
+      }
     });
-    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
-    toast('✓ Vytvořeno');
-  }catch(e){ alert('Nepodařilo se uložit: '+e.message); }
 }
+function signOutUser(){ auth.signOut().then(()=> location.reload()).catch(()=> location.reload()); }
+function logout(){ if(!confirm('Odhlásit se?')) return; signOutUser(); }
 
-async function pickName(id){
-  const s = state.strojnici.find(x=>x.id===id);
-  if(!s) return;
-  if(s.claimedUid && s.claimedUid !== state.uid){
-    if(!confirm(s.jmeno+' je přihlášený/á na jiném zařízení. Převzít přihlášení sem?')) return;
-  }
-  if(s.pinHash){
-    const pin = prompt('PIN pro '+s.jmeno+':');
-    if(pin==null) return;
-    if(await sha256(pin.trim()) !== s.pinHash){ toast('Špatný PIN'); return; }
-  }
+// První přihlášení – uživatel zadá jméno → vytvoří se profil (klíčovaný Google uid).
+async function finishNameRegistration(){
+  const jmeno = (document.getElementById('auth-name-input').value||'').trim();
+  if(jmeno.length < 2){ showAuthError('Zadej jméno'); return; }
+  showAuthError('⏳ Ukládám…');
   try{
-    await db.collection('strojnici').doc(id).update({ claimedUid: state.uid });
-    await db.collection('uids').doc(state.uid).set({ strojnikId:id }).catch(()=>{});
-    toast('✓ Přihlášen');
-  }catch(e){ alert('Chyba přihlášení: '+e.message); }
-}
-
-async function logout(){
-  if(!state.me) return;
-  if(!confirm('Odhlásit '+state.me.jmeno+' z tohoto telefonu?')) return;
-  try{
-    await db.collection('strojnici').doc(state.me.id).update({ claimedUid: null });
-    await db.collection('uids').doc(state.uid).delete().catch(()=>{});
-  }
-  catch(e){ alert(e.message); }
+    await db.collection('strojnici').doc(state.uid).set({
+      uid: state.uid, jmeno, email: state.email||'', role: 'strojnik',
+      aktivni: true, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showAuthError('');
+    // onSnapshot 'strojnici' doplní profil → resolveMe() → home
+  }catch(e){ showAuthError('Nepodařilo se uložit: '+e.message); }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1272,23 +1360,22 @@ function ciselnikStrojnici(){
   const list = state.strojnici.slice().sort((a,b)=> (a.jmeno||'').localeCompare(b.jmeno||''));
   return `
     <div class="card">
-      <h2>Přidat strojníka</h2>
-      <input id="np-jmeno" placeholder="Jméno a příjmení">
-      <button class="full green" style="margin-top:10px;" onclick="addStrojnik()">+ Přidat strojníka</button>
-      <p class="help">Strojník se pak přihlásí výběrem svého jména. PIN je nepovinný.</p>
+      <p class="help">Strojníci se přidají sami při prvním přihlášení Googlem. Tady je můžeš přejmenovat, povýšit na vedoucího (admin), nebo smazat.</p>
     </div>
-    ${list.map(s=>`
+    ${list.map(s=>{
+      const fixedAdmin = isAdminEmail(s.email);
+      const jeAdmin = fixedAdmin || state.adminUids.includes(s.id) || s.role==='admin';
+      return `
       <div class="list-edit ${s.aktivni===false?'inactive':''}" style="flex-wrap:wrap;">
         <div class="le-main" style="flex-basis:100%;">
-          <div class="le-title">${escapeHtml(s.jmeno)} ${s.role==='admin'?'<span style="color:var(--accent2);font-size:12px;">★ vedoucí</span>':''}</div>
-          <div class="le-sub">${s.claimedUid?'přihlášen':'nepřihlášen'}${s.pinHash?' · PIN':''}</div>
+          <div class="le-title">${escapeHtml(s.jmeno)} ${jeAdmin?'<span style="color:var(--accent2);font-size:12px;">★ vedoucí</span>':''}</div>
+          <div class="le-sub">${escapeHtml(s.email||'—')}</div>
         </div>
         <button class="secondary" onclick="renameStrojnik('${s.id}')">✏ Přejmenovat</button>
-        <button class="secondary" onclick="setPin('${s.id}')">PIN</button>
-        ${s.claimedUid?`<button class="secondary" onclick="unclaim('${s.id}')">Odpojit</button>`:''}
-        <button class="secondary" onclick="toggleRole('${s.id}','${s.role||'strojnik'}')">${s.role==='admin'?'➖ admin':'➕ admin'}</button>
+        ${fixedAdmin?'':`<button class="secondary" onclick="toggleAdmin('${s.id}',${state.adminUids.includes(s.id)})">${state.adminUids.includes(s.id)?'➖ vedoucí':'➕ vedoucí'}</button>`}
         ${s.id!==state.me.id?`<button class="danger" onclick="deleteStrojnik('${s.id}')">🗑 Smazat</button>`:''}
-      </div>`).join('')}`;
+      </div>`;
+    }).join('') || '<div class="empty-msg">Zatím žádný strojník.</div>'}`;
 }
 async function renameStrojnik(id){
   const s = state.strojnici.find(x=>x.id===id); if(!s) return;
@@ -1302,36 +1389,17 @@ async function deleteStrojnik(id){
   const s = state.strojnici.find(x=>x.id===id); if(!s) return;
   if(s.id===state.me.id){ toast('Sám sebe nelze smazat'); return; }
   if(!confirm('Smazat strojníka „'+(s.jmeno||'')+'"? Jeho zapsané dny zůstanou (s jeho jménem).')) return;
-  if(s.claimedUid) await db.collection('uids').doc(s.claimedUid).delete().catch(()=>{});
+  await db.collection('admins').doc(id).delete().catch(()=>{});
   await db.collection('strojnici').doc(id).delete();
   toast('🗑 Smazáno');
 }
-async function addStrojnik(){
-  const jmeno=(document.getElementById('np-jmeno').value||'').trim();
-  if(jmeno.length<2){ toast('Zadej jméno'); return; }
-  await db.collection('strojnici').doc(uid('strojnik')).set({
-    jmeno, role:'strojnik', aktivni:true, claimedUid:null, pinHash:null,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  toast('✓ Strojník přidán');
-}
-async function setPin(id){
-  const pin = prompt('Nastav 4-místný PIN (prázdné = bez PINu):');
-  if(pin==null) return;
-  const pinHash = pin.trim()==='' ? null : await sha256(pin.trim());
-  await db.collection('strojnici').doc(id).update({ pinHash });
-  toast('✓ PIN nastaven');
-}
-async function unclaim(id){
-  if(!confirm('Odpojit zařízení tohoto strojníka?')) return;
-  const t = state.strojnici.find(x=>x.id===id);
-  if(t && t.claimedUid) await db.collection('uids').doc(t.claimedUid).delete().catch(()=>{});
-  await db.collection('strojnici').doc(id).update({ claimedUid:null });
-  toast('✓ Odpojeno');
-}
-async function toggleRole(id, role){
-  await db.collection('strojnici').doc(id).update({ role: role==='admin'?'strojnik':'admin' });
-  toast('✓ Změněno');
+// Vedoucí (admin) – autoritativně přes kolekci admins (klíč = Google uid strojníka).
+async function toggleAdmin(uidId, isAdminNow){
+  try{
+    if(isAdminNow) await db.collection('admins').doc(uidId).delete();
+    else await db.collection('admins').doc(uidId).set({ addedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    toast('✓ Změněno');
+  }catch(e){ alert(e.message); }
 }
 async function toggleAktiv(coll, id, makeActive){
   await db.collection(coll).doc(id).update({ aktivni: !!makeActive });
@@ -1354,47 +1422,52 @@ async function renameCiselnik(coll, id, field){
 /* ════════════════════════════════════════════════════════════════════
    9) START – Firebase init, auth, realtime subscriptions
    ════════════════════════════════════════════════════════════════════ */
-// Zajisti, že přihlášené zařízení má mapování uids → strojník
-// (pravidla podle něj poznají admina; samoopraví i starší účty bez mapování).
-function ensureUidDoc(){
-  if(state.me && state.uid){
-    db.collection('uids').doc(state.uid).set({ strojnikId: state.me.id }, { merge:true }).catch(()=>{});
+// Vyřeš, kdo jsem (profil podle Google uid) + role admina (e-mail allowlist / admins kolekce).
+function resolveMe(){
+  if(!state.uid) return;
+  const prevId = state.me ? state.me.id : null;
+  const me = state.strojnici.find(s => s.id === state.uid) || null;
+  if(me){
+    me.role = (isAdminEmail(state.email) || state.adminUids.includes(state.uid)) ? 'admin' : (me.role || 'strojnik');
   }
-}
-
-function decideStart(){
-  if(state.started) return;
-  if(!state.loaded.strojnici) return;
-  state.started = true;
-  state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
-  ensureUidDoc();
-  setRoot(state.me ? 'home' : 'login');
-}
-
-function watchAuthState(){
-  const prevMeId = state.me ? state.me.id : null;
-  state.me = state.strojnici.find(s => s.claimedUid && s.claimedUid===state.uid) || null;
-  ensureUidDoc();
-  const meId = state.me ? state.me.id : null;
-  if(prevMeId !== meId){
-    setRoot(state.me ? 'home' : 'login');
+  state.me = me;
+  if(!state.loaded.strojnici) return;   // počkej na načtení seznamu strojníků
+  if(me){
+    hideGate();
+    const onLogin = !routeStack.length || routeStack[routeStack.length-1].view==='login';
+    if(prevId !== me.id || onLogin) setRoot('home'); else rerender();
   } else {
-    rerender();
+    // přihlášen Googlem, ale ještě nemá profil → poprosit o jméno
+    const inp = document.getElementById('auth-name-input');
+    if(inp && !inp.value) inp.value = state._googleName || '';
+    showGate('name');
   }
 }
 
 function startFirebase(){
   firebase.initializeApp(firebaseConfig);
+  // App Check (ochrana API). Aktivuje se jen když je nastavený reCAPTCHA site key.
+  if(RECAPTCHA_SITE_KEY && RECAPTCHA_SITE_KEY.indexOf('PASTE_')===-1){
+    try{ firebase.appCheck().activate(RECAPTCHA_SITE_KEY, true); }catch(e){ console.warn('AppCheck', e); }
+  }
   auth = firebase.auth();
   db = firebase.firestore();
   db.enablePersistence({ synchronizeTabs:true }).catch(()=>{});
 
-  // Jediné přihlášení – onAuthStateChanged se postará o anonymní sign-in,
-  // pokud uživatel ještě není přihlášený. (Dvojí volání by mohlo přepnout uid.)
+  // Po návratu z redirect přihlášení (iOS PWA) dokonči flow.
+  auth.getRedirectResult().catch(()=>{});
+
   auth.onAuthStateChanged(user => {
-    if(!user){ auth.signInAnonymously().catch(e=>{ alert('Přihlášení selhalo: '+e.message); }); return; }
+    if(!user){
+      state.uid = null; state.email = null; state.me = null;
+      showGate('main');
+      return;
+    }
     state.uid = user.uid;
+    state.email = user.email || '';
+    state._googleName = user.displayName || '';
     subscribeAll();
+    resolveMe();
   });
 }
 
@@ -1405,8 +1478,14 @@ function subscribeAll(){
   db.collection('strojnici').onSnapshot(snap=>{
     state.strojnici = snap.docs.map(d=>({id:d.id, ...d.data()}));
     state.loaded.strojnici = true;
-    if(!state.started) decideStart(); else watchAuthState();
+    resolveMe();
   }, err=>console.error('strojnici', err));
+
+  // Admini (autoritativní seznam pro rozpoznání vedoucího). Kolekce nemusí existovat.
+  db.collection('admins').onSnapshot(snap=>{
+    state.adminUids = snap.docs.map(d=>d.id);
+    resolveMe();
+  }, err=>{ /* admins nedostupné – ok, admina pozná i e-mail allowlist */ });
 
   db.collection('stroje').onSnapshot(snap=>{
     state.stroje = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -1433,7 +1512,8 @@ if('serviceWorker' in navigator){
 
 /* ── Start ─────────────────────────────────────────────── */
 (function start(){
-  if(!FIREBASE_CONFIGURED){ setRoot('setup'); return; }
+  if(!FIREBASE_CONFIGURED){ hideGate(); setRoot('setup'); return; }
+  showGate('main');           // přihlašovací obrazovka, dokud se uživatel nepřihlásí Googlem
   startFirebase();
 })();
 </script>
