@@ -6,6 +6,7 @@ Mobilní webová aplikace (PWA) pro rychlé vyplňování **desetidenního výka
 
 - **Přihlášení jménem** – strojník jen klikne na své jméno ze seznamu (volitelný PIN). Žádná hesla, žádné SMS.
 - **Stroj se vybírá pro daný den** – ze společného číselníku, nebo se napíše ručně (našeptávač). Strojníci nemají stálý stroj.
+- **Kategorie strojů (četa / středisko)** – každý stroj může mít kategorii (např. *Pokládka Šťastný*, *Pokládka Fojtík*, *Strakonice*). Při zápisu dne slouží jako **předfiltr** – strojník nevybírá ze všech strojů. Strojník si může na úvodní obrazovce nastavit **„Moje kategorie"** (oblíbená) → rovnou se mu nabízí jen jeho stroje. Vždy lze přepnout na „Všechny stroje".
 - **Rychlý zápis dne** – stavba · stav počítadla · tankování ano/ne (hodiny od–do nepovinně). Motohodiny (Mth) se **dopočítají z rozdílu počítadla**.
 - **„Jako včera"** – jedním tlačítkem předvyplní včerejší den, stačí změnit počítadlo.
 - **Našeptávač staveb** – učí se ze zadaných akcí (napíšeš „Marti" → nabídne „Martinovice").
@@ -106,9 +107,9 @@ service cloud.firestore {
 
 | Kolekce | Co obsahuje |
 |---------|-------------|
-| `strojnici` | jméno, role (`strojnik`/`admin`), `claimedUid` (zařízení), `pinHash` |
+| `strojnici` | jméno, e-mail, role (`strojnik`/`admin`), `uid` (Google), `oblibenaKategorie` (předfiltr strojů) |
 | `uids` | mapování `auth.uid` → `strojnikId` (pro rozpoznání admina v pravidlech) |
-| `stroje` | číselník: název, typ, SPZ, `lastMoto` (cache počítadla) |
+| `stroje` | číselník: název, typ, SPZ, `kategorie` (četa/středisko), `maMotohodiny`, `lastMoto` (cache počítadla) |
 | `stavby` | číselník: kód, název |
 | `zaznamy` | **jeden den**: `${strojník}__${stroj}__${datum}` → datum, stroj, strojník, stavba, `stavCitadla`, `mth`, hodiny, tankování |
 | `zaznamy/{id}/poznamky` | připomínky k záznamu (text, autor, čas) |

@@ -477,6 +477,12 @@ function zStrojKey(z){ return z.strojId ? ('id:'+z.strojId) : ('man:'+slug(z.str
 // Jiný strojník udělá vlastní (samostatný) záznam, nelze přepsat cizí.
 function recordId(strojnikId, strojKey, datum){ return slug(strojnikId) + '__' + slug(strojKey) + '__' + datum; }
 
+// Seznam existujících kategorií strojů (četa/středisko) – učí se z číselníku.
+function strojKategorie(){
+  return [...new Set(state.stroje.map(s => (s.kategorie||'').trim()).filter(Boolean))]
+    .sort((a,b)=> a.localeCompare(b,'cs'));
+}
+
 // Našeptávač staveb – učí se ze zadaných hodnot + číselníku
 function stavbaSuggestions(){
   const set = new Set();
@@ -720,6 +726,14 @@ function renderHome(){
       Tato dekáda: <b>${inDek.length}</b> dní · motohodiny <b>${sumMth.toFixed(1)} mth</b>
     </div>
 
+    ${strojKategorie().length ? `<div class="totals" style="margin-bottom:14px;display:flex;align-items:center;gap:8px;justify-content:center;flex-wrap:wrap;">
+      🏷 Moje kategorie:
+      <select id="home-oblibena" onchange="setOblibenaKategorie(this.value)" style="width:auto;padding:6px 10px;">
+        <option value="">— vše —</option>
+        ${strojKategorie().map(k=>`<option value="${escapeHtml(k)}" ${state.me.oblibenaKategorie===k?'selected':''}>${escapeHtml(k)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+
     <div class="menu-grid" style="margin-bottom:6px;">
       <div class="menu-item" onclick="navigate('prehled',{})"><span class="mi-ico">📊</span>Přehled / desetidenka</div>
       <div class="menu-item" onclick="navigate('tankovani',{})"><span class="mi-ico">⛽</span>Tankování</div>
@@ -768,11 +782,19 @@ function renderDen(params){
 
   const strojeAkt = state.stroje.filter(s=>s.aktivni!==false);
   const existingManualName = existing && existing.strojRucni ? (existing.strojNazev||'') : '';
-  const strojOptions = strojeAkt.map(s =>
-    `<option value="${s.id}" ${existing && existing.strojId===s.id?'selected':''}>${escapeHtml(s.nazev)}${s.spz?' ('+escapeHtml(s.spz)+')':''}</option>`).join('');
   const manualNew = existing && existing.strojRucni;   // legacy záznam bez číselníku
   const strojNames = strojeAkt.map(s=>s.nazev);
   const autor = existing ? existing.strojnikJmeno : state.me.jmeno;
+  // Předfiltr strojů podle kategorie (četa / středisko). Default = oblíbená kategorie strojníka.
+  const _kats = strojKategorie();
+  let _initKat = '__all__';
+  if(existing){
+    const exS = existing.strojId ? state.stroje.find(s=>s.id===existing.strojId) : null;
+    if(exS && exS.kategorie) _initKat = exS.kategorie;
+  } else if(state.me.oblibenaKategorie && _kats.includes(state.me.oblibenaKategorie)){
+    _initKat = state.me.oblibenaKategorie;
+  }
+  const _desiredStroj = existing ? (existing.strojRucni ? '__manual__' : (existing.strojId||'')) : '';
 
   document.getElementById('main').innerHTML = `
     <div class="dekada-title">${isoToCz(datum)}</div>
@@ -784,13 +806,17 @@ function renderDen(params){
         <input id="f-datum" type="date" value="${datum}" onchange="setStartDefault(true);updateMth();checkConflict();">
       </div>
 
+      ${_kats.length ? `<div class="row" style="display:block;">
+        <label>Kategorie (četa / středisko)</label>
+        <select id="f-kat-filter" onchange="katFilterChange()">
+          <option value="__all__" ${_initKat==='__all__'?'selected':''}>Všechny stroje</option>
+          ${_kats.map(k=>`<option value="${escapeHtml(k)}" ${_initKat===k?'selected':''}>${escapeHtml(k)}</option>`).join('')}
+        </select>
+      </div>` : ''}
+
       <div class="row" style="display:block;">
         <label>Stroj</label>
-        <select id="f-stroj" onchange="onStrojChange()">
-          <option value="">— vyber stroj —</option>
-          ${strojOptions}
-          <option value="__manual__" ${manualNew?'selected':''}>✏️ napsat ručně (přidá se do seznamu)…</option>
-        </select>
+        <select id="f-stroj" onchange="onStrojChange()"><option value="">— vyber stroj —</option></select>
         <div class="ac-wrap" id="f-strojManual-wrap" style="margin-top:8px; display:${manualNew?'block':'none'};">
           <input id="f-strojManual" placeholder="napiš název stroje" value="${manualNew?escapeHtml(existingManualName):''}" autocomplete="off" oninput="onManualInput()">
           <div class="ac-box" id="f-strojManual-box"></div>
@@ -873,6 +899,7 @@ function renderDen(params){
   _typ = r.typPrace || 'hlavni';
   attachAutocomplete('f-stavba','f-stavba-box', stavbaSuggestions());
   attachAutocomplete('f-strojManual','f-strojManual-box', strojNames);
+  rebuildStrojOptions(_desiredStroj);
   applyStrojMode();
   setStartDefault(false);
   updateMth();
@@ -933,6 +960,32 @@ function onStrojChange(){
   setStartDefault(true);
   updateMth();
   checkConflict();
+}
+// Naplní nabídku strojů podle zvolené kategorie (předfiltr). `desired` = stroj, který
+// má zůstat vybraný (i kdyby do filtru nespadal – třeba u úpravy cizí kategorie).
+function rebuildStrojOptions(desired){
+  const sel = document.getElementById('f-stroj');
+  if(!sel) return;
+  if(desired===undefined) desired = sel.value;
+  const filterEl = document.getElementById('f-kat-filter');
+  const kat = filterEl ? filterEl.value : '__all__';
+  let list = state.stroje.filter(s=>s.aktivni!==false);
+  if(kat!=='__all__') list = list.filter(s=>(s.kategorie||'')===kat);
+  // Vybraný stroj zachovej v nabídce, i když do filtru nespadá.
+  if(desired && desired!=='__manual__' && !list.some(s=>s.id===desired)){
+    const extra = state.stroje.find(s=>s.id===desired);
+    if(extra) list = [extra, ...list];
+  }
+  let opts = '<option value="">— vyber stroj —</option>';
+  opts += list.map(s=>`<option value="${s.id}">${escapeHtml(s.nazev)}${s.spz?' ('+escapeHtml(s.spz)+')':''}</option>`).join('');
+  opts += '<option value="__manual__">✏️ napsat ručně (přidá se do seznamu)…</option>';
+  sel.innerHTML = opts;
+  sel.value = desired || '';
+}
+// Změna předfiltru kategorie → překresli nabídku a resetuj výběr stroje.
+function katFilterChange(){
+  rebuildStrojOptions('');
+  onStrojChange();
 }
 function currentStrojKey(){
   const sel = document.getElementById('f-stroj').value;
@@ -1433,6 +1486,7 @@ function renderCiselniky(){
   document.getElementById('main').innerHTML = `
     <div class="tabs">${tabBtn('stroje','Stroje')}${tabBtn('stavby','Stavby')}${tabBtn('strojnici','Strojníci')}</div>
     ${body}`;
+  if(ciselnikTab==='stroje') attachAutocomplete('ns-kat','ns-kat-box', strojKategorie());
 }
 
 function ciselnikStroje(){
@@ -1445,6 +1499,10 @@ function ciselnikStroje(){
         <input id="ns-typ" placeholder="Typ (válec…)">
         <input id="ns-spz" placeholder="SPZ / inv. č.">
       </div>
+      <div class="ac-wrap" style="margin-top:8px;">
+        <input id="ns-kat" placeholder="Kategorie (četa / středisko – nepovinné)" autocomplete="off">
+        <div class="ac-box" id="ns-kat-box"></div>
+      </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);">
         <input type="checkbox" id="ns-mamoto" checked style="width:auto;"> Má počítadlo motohodin
       </label>
@@ -1456,10 +1514,11 @@ function ciselnikStroje(){
       return `
       <div class="list-edit ${s.aktivni===false?'inactive':''}" style="flex-wrap:wrap;">
         <div class="le-main" style="flex-basis:100%;">
-          <div class="le-title">${escapeHtml(s.nazev)} ${ma?'':'<span style="color:var(--accent2);font-size:11px;">bez počítadla</span>'}</div>
+          <div class="le-title">${escapeHtml(s.nazev)} ${ma?'':'<span style="color:var(--accent2);font-size:11px;">bez počítadla</span>'}${s.kategorie?` <span style="color:var(--accent);font-size:11px;">🏷 ${escapeHtml(s.kategorie)}</span>`:''}</div>
           <div class="le-sub">${escapeHtml(s.typ||'')}${s.spz?' · '+escapeHtml(s.spz):''}${ma&&s.lastMoto!=null?' · počítadlo '+s.lastMoto:''}</div>
         </div>
         <button class="secondary" onclick="renameCiselnik('stroje','${s.id}','nazev')">✏</button>
+        <button class="secondary" onclick="setStrojKategorie('${s.id}')">🏷</button>
         <button class="secondary" onclick="toggleMotohodiny('${s.id}',${ma})">${ma?'➖ počítadlo':'➕ počítadlo'}</button>
         <button class="secondary" onclick="toggleAktiv('stroje','${s.id}',${s.aktivni===false})">${s.aktivni===false?'Obnovit':'Skrýt'}</button>
         <button class="danger" onclick="deleteCiselnik('stroje','${s.id}')">🗑</button>
@@ -1472,6 +1531,7 @@ async function addStroj(){
   await db.collection('stroje').doc(uid('stroj')).set({
     nazev, typ:(document.getElementById('ns-typ').value||'').trim(),
     spz:(document.getElementById('ns-spz').value||'').trim(), aktivni:true,
+    kategorie:(document.getElementById('ns-kat').value||'').trim(),
     maMotohodiny: document.getElementById('ns-mamoto').checked,
     lastMoto:null, lastMotoDate:null
   });
@@ -1480,6 +1540,23 @@ async function addStroj(){
 async function toggleMotohodiny(id, ma){
   await db.collection('stroje').doc(id).update({ maMotohodiny: !ma });
   toast('✓ Změněno');
+}
+// Nastavit/změnit kategorii (četu/středisko) stroje.
+async function setStrojKategorie(id){
+  const s = state.stroje.find(x=>x.id===id); if(!s) return;
+  const nove = prompt('Kategorie (četa / středisko) – prázdné = bez kategorie:', s.kategorie||'');
+  if(nove==null) return;
+  await db.collection('stroje').doc(id).update({ kategorie: nove.trim() });
+  toast('✓ Uloženo');
+}
+// Strojníkova oblíbená kategorie – předvyplní se u zápisu dne (lze přepnout na „vše").
+async function setOblibenaKategorie(v){
+  if(!state.me) return;
+  state.me.oblibenaKategorie = v;
+  try{
+    await db.collection('strojnici').doc(state.me.id).update({ oblibenaKategorie: v });
+    toast(v ? '✓ Kategorie nastavena' : '✓ Zrušeno');
+  }catch(e){ toast('Chyba uložení'); }
 }
 // Jednorázový import výchozího seznamu strojů (přidá jen ty, co ještě nejsou).
 async function importStroje(){
@@ -1492,7 +1569,7 @@ async function importStroje(){
   for(const x of toAdd){
     try{
       await db.collection('stroje').doc(uid('stroj')).set({
-        nazev:x.n, typ:'', spz:'', aktivni:true, maMotohodiny:x.m,
+        nazev:x.n, typ:'', spz:'', aktivni:true, kategorie:'', maMotohodiny:x.m,
         lastMoto:null, lastMotoDate:null, autoPridano:false
       });
       ok++;

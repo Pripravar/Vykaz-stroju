@@ -1,6 +1,6 @@
 // Service Worker - offline cache pro PWA (app shell).
 // Verze cache - při změně index.html zvyš číslo, aby se cache obnovila.
-const CACHE = 'desetidenka-v3';
+const CACHE = 'desetidenka-v4';
 
 const ASSETS = [
   './',
