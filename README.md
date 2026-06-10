@@ -83,6 +83,12 @@ service cloud.firestore {
         allow update, delete: if signedIn() && (resource.data.autorUid == request.auth.uid || isAdmin());
       }
     }
+
+    match /tankovani/{id} {
+      allow read:   if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if signedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+    }
   }
 }
 ```
